@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Managed Accounts · GPT Registrator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --paper: #f4f0e8;
+      --paper-deep: #ebe5da;
+      --surface: #fffdf8;
+      --ink: #171614;
+      --ink-soft: #3d3a34;
+      --muted: #787166;
+      --line: #dcd5c8;
+      --line-strong: #c9c0b1;
+      --blue: #244bd8;
+      --blue-soft: #e8edff;
+      --coral: #df5a3e;
+      --green: #20734d;
+      --green-soft: #e6f4ec;
+      --amber: #a86412;
+      --amber-soft: #fbf0dc;
+      --red: #b63128;
+      --red-soft: #fbe9e7;
+      --radius: 12px;
+      --shadow: 0 18px 40px rgba(42, 34, 22, .07);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 0%, rgba(255,255,255,.9), transparent 34%),
+        radial-gradient(circle at 92% 8%, rgba(223,90,62,.10), transparent 26%),
+        var(--paper);
+      font-family: "DM Sans", "Microsoft YaHei", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .22;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.28'/%3E%3C/svg%3E");
+      z-index: 20;
+    }
+    a { color: inherit; }
+    button, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      min-height: 68px;
+      padding: 0 34px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(244,240,232,.88);
+      backdrop-filter: blur(16px);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 9px;
+      background: var(--ink);
+      color: var(--paper);
+      font-family: "Fraunces", Georgia, serif;
+      font-size: 18px;
+      line-height: 1;
+    }
+    .brand-copy { display: flex; flex-direction: column; line-height: 1.05; }
+    .brand-copy b { font-size: 13px; letter-spacing: .12em; text-transform: uppercase; }
+    .brand-copy small { color: var(--muted); font-size: 11px; letter-spacing: .04em; }
+    .crumb { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; }
+    .crumb a { text-decoration: none; }
+    .crumb a:hover { color: var(--ink); }
+    .crumb b { color: var(--ink-soft); font-weight: 500; }
+    .top-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+    .live { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+    .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px rgba(32,115,77,.10); }
+    .live-dot.busy { background: var(--amber); box-shadow: 0 0 0 4px rgba(168,100,18,.12); animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 50% { transform: scale(.7); opacity: .6; } }
+    .icon-button {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--ink-soft);
+      background: var(--surface);
+      transition: .16s ease;
+    }
+    .icon-button:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+
+    main { width: min(1560px, calc(100% - 56px)); margin: 0 auto; padding: 28px 0 70px; }
+    .workspace { display: grid; grid-template-columns: 338px minmax(0, 1fr); grid-template-areas: "head head" "side ledger"; gap: 16px; align-items: start; }
+    .workspace > .hero { grid-area: head; }
+    .workspace > .side { grid-area: side; position: sticky; top: 82px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .workspace > .ledger { grid-area: ledger; min-width: 0; }
+    .workspace .hero { margin-bottom: 0; align-items: center; }
+    .workspace .eyebrow, .workspace .lede, .workspace .hero-meta { display: none; }
+    .workspace .hero h1 { font-size: clamp(28px, 3.4vw, 38px); letter-spacing: -.04em; }
+    .workspace .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+    .workspace .stat { min-height: 72px; padding: 10px 12px; }
+    .workspace .stat::after { display: none; }
+    .workspace .stat span { font-size: 9px; letter-spacing: .1em; }
+    .workspace .stat strong { margin-top: 3px; font-size: 24px; }
+    .workspace .stat small { display: none; }
+    .workspace .intake { display: block; margin: 0; }
+    .workspace .intake-copy { padding: 18px 18px 15px; border-right: 0; border-bottom: 1px solid rgba(255,253,248,.12); }
+    .workspace .intake-copy h2 { font-size: 20px; }
+    .workspace .intake-copy p { margin-top: 7px; font-size: 11px; line-height: 1.55; }
+    .workspace .format-list { gap: 5px; margin-top: 11px; }
+    .workspace .format-list code { font-size: 10px; }
+    .workspace .intake-body { padding: 15px; }
+    .workspace .intake-grid { grid-template-columns: 1fr; gap: 10px; }
+    .workspace .intake textarea { min-height: 88px; }
+    .workspace .intake-foot { margin-top: 10px; }
+    .workspace .ledger { margin: 0; }
+    .hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 30px; margin-bottom: 30px; animation: rise .55s ease both; }
+    .eyebrow { margin: 0 0 13px; color: var(--coral); font: 500 11px/1 "DM Mono", monospace; letter-spacing: .18em; text-transform: uppercase; }
+    h1 { margin: 0; font-family: "Fraunces", Georgia, serif; font-weight: 500; font-size: clamp(44px, 6vw, 78px); line-height: .92; letter-spacing: -.055em; }
+    h1 .accent { color: var(--coral); }
+    .lede { max-width: 620px; margin: 18px 0 0; color: var(--muted); font-size: 14px; line-height: 1.75; }
+    .hero-meta { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; max-width: 390px; }
+    .chip { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; color: var(--muted); background: rgba(255,253,248,.6); font-size: 11px; white-space: nowrap; }
+    .chip.dark { color: var(--paper); background: var(--ink); border-color: var(--ink); }
+
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; animation: rise .55s .06s ease both; }
+    .stat { position: relative; min-height: 116px; padding: 18px 18px 15px; border: 1px solid var(--line); border-radius: var(--radius); background: rgba(255,253,248,.72); overflow: hidden; }
+    .stat::after { content: ""; position: absolute; right: -18px; bottom: -38px; width: 112px; height: 112px; border: 1px solid var(--line); border-radius: 50%; opacity: .65; }
+    .stat span { display: block; color: var(--muted); font: 500 10px/1.2 "DM Mono", monospace; letter-spacing: .14em; text-transform: uppercase; }
+    .stat strong { display: block; margin-top: 8px; font-family: "Fraunces", Georgia, serif; font-size: 39px; font-weight: 500; line-height: 1; letter-spacing: -.04em; }
+    .stat small { display: block; margin-top: 7px; color: var(--muted); font-size: 11px; }
+    .stat.highlight { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    .stat.highlight span, .stat.highlight small { color: rgba(255,253,248,.58); }
+    .stat.highlight::after { border-color: rgba(255,253,248,.18); }
+
+    .intake { display: grid; grid-template-columns: .72fr 1.28fr; gap: 0; margin-bottom: 18px; border-radius: var(--radius); background: var(--ink); color: var(--paper); box-shadow: var(--shadow); overflow: hidden; animation: rise .55s .12s ease both; }
+    .intake-copy { padding: 28px 28px 24px; border-right: 1px solid rgba(255,253,248,.12); }
+    .intake-copy h2, .ledger-head h2 { margin: 0; font-family: "Fraunces", Georgia, serif; font-weight: 500; font-size: 25px; letter-spacing: -.025em; }
+    .intake-copy p { margin: 11px 0 0; color: rgba(255,253,248,.55); font-size: 12px; line-height: 1.75; }
+    .format-list { display: flex; flex-direction: column; gap: 8px; margin-top: 21px; }
+    .format-list code { color: #f3d8ce; font: 11px/1.65 "DM Mono", monospace; }
+    .format-list span { color: rgba(255,253,248,.38); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
+    .intake-body { padding: 22px; background: #211f1b; }
+    .intake-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .field-label { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 7px; color: rgba(255,253,248,.64); font-size: 11px; }
+    .field-label em { color: rgba(255,253,248,.34); font: 400 10px/1.4 "DM Mono", monospace; font-style: normal; }
+    .intake textarea {
+      width: 100%;
+      min-height: 132px;
+      resize: vertical;
+      border: 1px solid rgba(255,253,248,.14);
+      border-radius: 9px;
+      padding: 12px;
+      color: #f7f0e5;
+      background: #171614;
+      font: 11px/1.7 "DM Mono", monospace;
+      caret-color: var(--coral);
+    }
+    .intake textarea::placeholder { color: rgba(255,253,248,.25); }
+    .intake textarea:focus { border-color: rgba(223,90,62,.65); outline: none; }
+    .intake-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 13px; }
+    .intake-hint { color: rgba(255,253,248,.46); font-size: 11px; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--ink-soft);
+      background: var(--surface);
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+      transition: transform .15s ease, border-color .15s ease, background .15s ease, color .15s ease;
+    }
+    .btn:hover:not(:disabled) { border-color: var(--line-strong); transform: translateY(-1px); }
+    .btn.primary { color: var(--paper); background: var(--blue); border-color: var(--blue); }
+    .btn.primary:hover:not(:disabled) { background: #1c3cb8; border-color: #1c3cb8; }
+    .intake .btn.primary { background: var(--coral); border-color: var(--coral); }
+    .intake .btn.primary:hover:not(:disabled) { background: #ca4b31; border-color: #ca4b31; }
+    .btn.ghost { color: rgba(255,253,248,.62); background: transparent; border-color: rgba(255,253,248,.18); }
+    .btn.ghost:hover:not(:disabled) { color: var(--paper); border-color: rgba(255,253,248,.4); }
+    .btn.soft { color: var(--blue); background: var(--blue-soft); border-color: transparent; }
+    .btn.soft:hover:not(:disabled) { background: #dbe4ff; }
+    .btn.danger { color: var(--red); background: var(--red-soft); border-color: transparent; }
+    .btn.compact { min-height: 30px; padding: 0 9px; font-size: 11px; }
+    .icon-btn {
+      display: inline-grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      background: var(--surface);
+      transition: .15s ease;
+    }
+    .icon-btn:hover:not(:disabled) { color: var(--ink); border-color: var(--line-strong); transform: translateY(-1px); }
+    .icon-btn.danger:hover:not(:disabled) { color: var(--red); border-color: #e8b7b1; background: var(--red-soft); }
+    .btn svg, .icon-btn svg { width: 14px; height: 14px; flex: none; }
+
+    .ledger { border: 1px solid var(--line); border-radius: var(--radius); background: rgba(255,253,248,.68); overflow: hidden; animation: rise .55s .18s ease both; }
+    .ledger-head { display: flex; align-items: baseline; gap: 14px; padding: 20px 22px; border-bottom: 1px solid var(--line); }
+    .ledger-head .count { color: var(--muted); font: 11px/1 "DM Mono", monospace; }
+    .ledger-head .sync { margin-left: auto; color: var(--muted); font: 10px/1.4 "DM Mono", monospace; }
+    .table-wrap { overflow: auto; }
+    table { width: 100%; min-width: 1280px; border-collapse: separate; border-spacing: 0; }
+    th, td { padding: 12px 12px; border-bottom: 1px solid rgba(220,213,200,.65); text-align: left; vertical-align: middle; }
+    th:first-child, td:first-child { padding-left: 18px; position: sticky; left: 0; z-index: 2; background: #fbf8f2; }
+    th:first-child { z-index: 3; background: #f8f4ed; }
+    th:last-child, td:last-child { padding-right: 18px; }
+    tbody tr:hover td:first-child { background: #fdfbf7; }
+    th { position: sticky; top: 0; z-index: 1; background: #f8f4ed; color: var(--muted); font: 500 10px/1.2 "DM Mono", monospace; letter-spacing: .12em; text-transform: uppercase; }
+    tbody tr { transition: background .15s ease; }
+    tbody tr:hover { background: rgba(255,255,255,.55); }
+    tbody tr:last-child td { border-bottom: none; }
+    .account { display: flex; align-items: center; gap: 10px; min-width: 220px; }
+    .avatar { display: grid; place-items: center; width: 31px; height: 31px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink-soft); background: var(--paper-deep); font: 600 11px/1 "DM Mono", monospace; text-transform: uppercase; }
+    .account-copy { min-width: 0; }
+    .account-copy b { display: block; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+    .account-copy small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+    .tag-chip { display: inline-flex; max-width: 160px; margin-top: 2px; padding: 1px 6px; border: 1px dashed transparent; border-radius: 6px; color: var(--muted); background: var(--paper-deep); font: 9px/1.35 "DM Mono", monospace; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tag-chip:hover { color: var(--ink); border-color: var(--line-strong); }
+    .tag-chip.tag-empty { border-style: dashed; background: transparent; color: var(--muted); }
+    .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+    .mini-chip { display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 999px; color: var(--muted); background: var(--paper-deep); font: 10px/1.4 "DM Mono", monospace; white-space: nowrap; }
+    .mini-chip.ok { color: var(--green); background: var(--green-soft); }
+    .mini-chip.miss { color: var(--red); background: var(--red-soft); }
+    .proxy { max-width: 200px; }
+    .proxy b { display: block; color: var(--ink-soft); font: 11px/1.4 "DM Mono", monospace; }
+    .proxy small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .state { min-width: 130px; }
+    .status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; font-size: 10px; font-weight: 500; white-space: nowrap; }
+    .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .8; }
+    .status.neutral { color: var(--muted); background: var(--paper-deep); }
+    .status.warn { color: var(--amber); background: var(--amber-soft); }
+    .status.ok { color: var(--green); background: var(--green-soft); }
+    .status.bad { color: var(--red); background: var(--red-soft); }
+    .state-error { max-width: 230px; margin-top: 6px; color: var(--red); font-size: 10px; line-height: 1.45; word-break: break-word; }
+    .quota { min-width: 226px; display: flex; gap: 12px; }
+    .quota-window { flex: 1; min-width: 92px; }
+    .quota-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 5px; color: var(--muted); font: 10px/1.2 "DM Mono", monospace; }
+    .quota-head b { color: var(--ink-soft); font-weight: 500; }
+    .bar { height: 4px; border-radius: 99px; background: var(--paper-deep); overflow: hidden; }
+    .bar span { display: block; height: 100%; background: var(--blue); border-radius: inherit; }
+    .bar span.warn { background: var(--amber); }
+    .bar span.bad { background: var(--red); }
+    .quota-foot { margin-top: 4px; color: var(--muted); font-size: 9px; }
+    .quota-empty { color: var(--muted); font-size: 10px; }
+    .reset { min-width: 94px; }
+    .reset-count { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font: 11px/1.4 "DM Mono", monospace; }
+    .reset-count b { color: var(--ink); font-size: 14px; font-weight: 500; }
+    .reset-title { max-width: 150px; margin-top: 4px; color: var(--green); font-size: 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .rt { min-width: 132px; }
+    .rt-actions { display: flex; flex-direction: column; align-items: stretch; gap: 5px; }
+    .rt-actions .btn { justify-content: flex-start; padding: 0 8px; }
+    .rt-actions .btn svg { width: 13px; height: 13px; }
+    .actions { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; }
+    .actions .btn { padding: 0 8px; }
+    .actions .icon-btn { width: 30px; height: 30px; }
+    td:last-child { white-space: nowrap; }
+
+    .empty { padding: 54px 20px; text-align: center; color: var(--muted); }
+    .empty strong { display: block; margin-bottom: 6px; color: var(--ink); font-family: "Fraunces", Georgia, serif; font-size: 22px; font-weight: 500; }
+    .empty span { font-size: 12px; }
+
+
+    .device-dialog {
+      width: min(520px, calc(100vw - 32px));
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      color: var(--ink);
+      box-shadow: 0 28px 70px rgba(23,22,20,.25);
+    }
+    .device-dialog::backdrop { background: rgba(23,22,20,.42); backdrop-filter: blur(4px); }
+    .device-dialog-inner { padding: 22px; }
+    .device-dialog-head { display: flex; align-items: flex-start; gap: 12px; }
+    .device-dialog-head > div { flex: 1; }
+    .device-dialog-head span { color: var(--coral); font: 500 10px/1.2 "DM Mono", monospace; letter-spacing: .14em; text-transform: uppercase; }
+    .device-dialog-head h3 { margin: 6px 0 0; font-family: "Fraunces", Georgia, serif; font-size: 25px; font-weight: 500; letter-spacing: -.03em; }
+    .device-dialog p { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+
+    .device-dialog-status { display: inline-flex; margin-top: 14px; color: var(--muted); font-size: 11px; }
+    .device-dialog-status.ok { color: var(--green); }
+    .device-dialog-status.bad { color: var(--red); }
+    .device-dialog-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+    .device-dialog-meta > div { min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+    .device-dialog-meta span { display: block; color: var(--muted); font: 9px/1.3 "DM Mono", monospace; letter-spacing: .1em; text-transform: uppercase; }
+    .device-dialog-meta b { display: block; margin-top: 4px; color: var(--ink-soft); font: 11px/1.4 "DM Mono", monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .device-log { margin: 10px 0 0; max-height: 130px; overflow: auto; padding: 9px 10px; border-radius: 8px; background: #171614; color: #e8e0d2; font: 9px/1.55 "DM Mono", monospace; white-space: pre-wrap; }
+    .device-dialog-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .device-dialog-foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 17px; }
+    #toast {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      z-index: 100;
+      max-width: min(470px, calc(100vw - 48px));
+      padding: 11px 15px;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 9px;
+      color: var(--paper);
+      background: var(--ink);
+      box-shadow: 0 18px 40px rgba(0,0,0,.18);
+      font-size: 12px;
+      line-height: 1.5;
+      opacity: 0;
+      transform: translateY(8px);
+      pointer-events: none;
+      transition: .2s ease;
+      white-space: pre-wrap;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @media (max-width: 1180px) {
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .intake { grid-template-columns: 1fr; }
+      .intake-copy { border-right: none; border-bottom: 1px solid rgba(255,253,248,.12); }
+      .workspace { grid-template-columns: 1fr; grid-template-areas: "head" "side" "ledger"; }
+      .workspace > .side { position: static; }
+    }
+    @media (max-width: 760px) {
+      .topbar { padding: 0 18px; gap: 12px; }
+      .crumb { display: none; }
+      main { width: calc(100% - 28px); padding-top: 28px; }
+      .hero { align-items: flex-start; flex-direction: column; gap: 18px; }
+      .hero-meta { justify-content: flex-start; }
+      .stats { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+      .stat { min-height: 98px; padding: 14px; }
+      .stat strong { font-size: 31px; }
+      .intake-copy, .intake-body { padding: 20px; }
+      .intake-grid { grid-template-columns: 1fr; }
+      .ledger-head { padding: 17px; flex-wrap: wrap; }
+      .ledger-head .sync { width: 100%; margin-left: 0; }
+      .table-wrap { margin: 0 -1px; }
+    }
+  </style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">
+    <span class="brand-mark">G</span>
+    <span class="brand-copy"><b>GPT</b><small>Registrator</small></span>
+  </a>
+  <div class="crumb"><a href="/">Console</a><span>/</span><b>Managed accounts</b></div>
+  <div class="top-actions">
+    <span class="live"><span class="live-dot" id="liveDot"></span><span id="liveText">Ready</span></span>
+    <button class="icon-button" id="refreshBtn" title="Refresh" aria-label="Refresh">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="workspace">
+  <section class="hero">
+    <div>
+      <p class="eyebrow">External accounts · operations desk</p>
+      <h1>托管账号<span class="accent">.</span></h1>
+      <p class="lede">密码与 TOTP 自动完成登录，手机页人工接管；统一查看 Codex 周/5h 限额、官方 reset card，并导出 refresh token。</p>
+    </div>
+    <div class="hero-meta">
+      <span class="chip dark">Headful login</span>
+      <span class="chip">Semi-auto SMS</span>
+      <span class="chip">Sticky proxy</span>
+      <span class="chip">Codex limits</span>
+    </div>
+  </section>
+
+  <aside class="side">
+  <section class="stats" aria-label="Account summary">
+    <article class="stat highlight"><span>Managed</span><strong id="statTotal">0</strong><small>accounts in pool</small></article>
+    <article class="stat"><span>RT exported</span><strong id="statRt">0</strong><small>refresh token ready</small></article>
+    <article class="stat"><span>In progress</span><strong id="statRunning">0</strong><small>login or SMS</small></article>
+    <article class="stat"><span>Reset credits</span><strong id="statReset">0</strong><small>available cards</small></article>
+  </section>
+
+  <section class="intake">
+    <div class="intake-copy">
+      <h2>Intake</h2>
+      <p>批量导入已有账号。账号与代理分离；代理留空时自动从主项目当前代理池分配独立的粘性 session。</p>
+      <div class="format-list">
+        <span>Account line</span>
+        <code>email----password----TOTP</code>
+        <span>Proxy line</span>
+        <code>socks5://user:pass@host:port</code>
+      </div>
+    </div>
+    <div class="intake-body">
+      <div class="intake-grid">
+        <label>
+          <span class="field-label">Accounts <em>one per line</em></span>
+          <textarea id="importText" spellcheck="false" placeholder="verge@example.com----password----BASE32SECRET&#10;another@example.com----password----BASE32SECRET"></textarea>
+        </label>
+        <label>
+          <span class="field-label">Sticky proxies <em>optional</em></span>
+          <textarea id="proxyText" spellcheck="false" placeholder="socks5://user:pass@host:port&#10;empty = auto assign from main pool"></textarea>
+        </label>
+      </div>
+      <div class="intake-foot">
+        <button class="btn primary" id="importBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          Import accounts
+        </button>
+        <button class="btn ghost" id="clearBtn">Clear</button>
+        <span class="intake-hint" id="importHint"></span>
+      </div>
+    </div>
+  </section>
+  </aside>
+
+  <section class="ledger">
+    <div class="ledger-head">
+      <h2>Account ledger</h2>
+      <span class="count" id="summary">0 accounts</span>
+      <span class="sync" id="lastSync"></span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Account</th>
+            <th>Auth</th>
+            <th>Proxy</th>
+            <th>State</th>
+            <th>Codex limits</th>
+            <th>Reset</th>
+            <th>RT</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+
+<dialog id="deviceDialog" class="device-dialog">
+  <div class="device-dialog-inner">
+    <div class="device-dialog-head">
+      <div>
+        <span>Codex device authorization</span>
+        <h3>Roxy window opens automatically</h3>
+      </div>
+      <button class="icon-btn" id="deviceClose" title="Close" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <p>已自动用该账号原来的 Roxy 指纹和粘性 IP 打开官方设备页。开始前会自动检查并开启 Settings → Security 里的「Device code authorization」（Codex / Excel / PowerPoint / Word）。CLI 生成 code 后不会自动填写，需要你自行输入你提供的 9 位 code。</p>
+    <div class="device-dialog-status" id="deviceStatus">Starting…</div>
+    <div class="device-dialog-meta">
+      <div><span>Stage</span><b id="deviceStage">—</b></div>
+      <div><span>Page</span><b id="devicePage">—</b></div>
+    </div>
+    <pre class="device-log" id="deviceLog">No stage log yet.</pre>
+    <div class="device-dialog-foot">
+      <div class="device-dialog-actions">
+        <button class="btn soft compact" id="deviceContinue">Continue</button>
+        <button class="btn soft compact" id="deviceRestart">Restart</button>
+        <button class="btn danger compact" id="deviceClear">Clear</button>
+        <button class="btn" id="deviceCloseBottom">Done</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let pollTimer = null;
+let isBusy = false;
+
+function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+function toast(text) {
+  const el = $('toast');
+  el.textContent = String(text || '');
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 4200);
+}
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    credentials: 'same-origin',
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;opacity:0;inset:0 auto auto 0';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  ta.remove();
+}
+function extractRefreshToken(obj) {
+  if (!obj || typeof obj !== 'object') return '';
+  return String(
+    obj.refresh_token || obj.refreshToken ||
+    (obj.tokens && (obj.tokens.refresh_token || obj.tokens.refreshToken)) ||
+    (obj.auth && (obj.auth.refresh_token || obj.auth.refreshToken)) || ''
+  );
+}
+function statusMeta(status) {
+  const map = {
+    new: ['New', 'neutral'],
+    running: ['Running', 'warn'],
+    success: ['Exported', 'ok'],
+    quota_ok: ['Ready', 'ok'],
+    failed: ['Failed', 'bad'],
+    stopped: ['Stopped', 'bad']
+  };
+  return map[String(status || 'new')] || [String(status || 'New'), 'neutral'];
+}
+function statusBadge(status) {
+  const [label, cls] = statusMeta(status);
+  return `<span class="status ${cls}">${esc(label)}</span>`;
+}
+function initials(email) {
+  const text = String(email || '?').trim();
+  return (text[0] || '?').toUpperCase();
+}
+function proxyMeta(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return { title: 'Auto pool', label: 'Auto pool', sub: 'assigned on login' };
+  const region = (text.match(/region-([a-z]{2})/i) || [])[1];
+  const session = (text.match(/-session-([a-z0-9]+)/i) || [])[1];
+  let host = '';
+  try { host = new URL(text).hostname; } catch (e) {}
+  const label = [region ? region.toUpperCase() : '', session || ''].filter(Boolean).join(' · ') || host || 'Proxy';
+  const sub = host && region ? host : (session ? 'sticky session' : host || 'custom proxy');
+  return { title: text, label, sub };
+}
+function quotaCell(a) {
+  const q = a.quota_summary || {};
+  const windows = q.windows || {};
+  const labels = { five_hour: '5h', weekly: 'Week', monthly: '30d' };
+  const order = ['five_hour', 'weekly', 'monthly'];
+  const parts = order.filter(k => windows[k]).map(k => {
+    const w = windows[k];
+    const used = Math.max(0, Math.min(100, Number(w.used_percent) || 0));
+    const cls = used >= 90 ? 'bad' : (used >= 70 ? 'warn' : '');
+    return `<div class="quota-window"><div class="quota-head"><b>${labels[k]}</b><span>${used.toFixed(0)}%</span></div><div class="bar"><span class="${cls}" style="width:${used}%"></span></div><div class="quota-foot">${Number(w.remaining_percent).toFixed(0)}% left</div></div>`;
+  });
+  if (!parts.length) return '<span class="quota-empty">No snapshot</span>';
+  return `<div class="quota">${parts.join('')}</div>`;
+}
+function resetCell(a) {
+  const cards = a.reset_cards || {};
+  const list = Array.isArray(cards.credits) ? cards.credits : [];
+  const available = list.filter(c => String(c.status || '').toLowerCase() === 'available');
+  const count = cards.available_count ?? available.length;
+  const first = available[0];
+  return `<div class="reset"><div class="reset-count">Reset <b>${esc(count ?? '—')}</b></div>${first ? `<div class="reset-title" title="${esc(first.title || first.id || '')}">${esc(first.title || 'Available')}</div>` : '<div class="reset-title" style="color:var(--muted)">none available</div>'}</div>`;
+}
+function rtCell(a) {
+  if (!a.has_rt) return '<span class="mini-chip">No RT</span>';
+  return `<div class="rt-actions"><button class="btn soft compact" data-action="copy-rt" data-id="${a.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy RT</button><button class="btn soft compact" data-action="copy-auth" data-id="${a.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>Copy Auth</button></div>`;
+}
+function render(rows) {
+  const body = $('rows');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="8"><div class="empty"><strong>No managed accounts yet.</strong><span>Paste accounts in Intake above to begin.</span></div></td></tr>';
+    updateStats([]);
+    return;
+  }
+  body.innerHTML = rows.map(a => {
+    const p = proxyMeta(a.proxy_used);
+    const [state, cls] = statusMeta(a.status);
+    const auth = [
+      `<span class="mini-chip ${a.has_password ? 'ok' : 'miss'}">${a.has_password ? 'Password' : 'No pass'}</span>`,
+      `<span class="mini-chip ${a.has_totp ? 'ok' : 'miss'}">${a.has_totp ? 'TOTP' : 'No 2FA'}</span>`
+    ].join('');
+    return `<tr>
+      <td><div class="account"><span class="avatar">${esc(initials(a.email))}</span><span class="account-copy"><b title="${esc(a.email)}">${esc(a.email)}</b><small>${esc(a.email_source || 'managed')}${a.codex_status ? ' · Codex ' + esc(a.codex_status) : ''}</small>${a.tag ? `<button class="tag-chip" data-action="tag" data-id="${a.id}" data-tag="${esc(a.tag)}" title="Edit tag / note">${esc(a.tag)}</button>` : `<button class="tag-chip tag-empty" data-action="tag" data-id="${a.id}" data-tag="" title="Add tag / note">+ 标签</button>`}</span></div></td>
+      <td><div class="chips">${auth}</div></td>
+      <td><div class="proxy" title="${esc(p.title)}"><b>${esc(p.label)}</b><small>${esc(p.sub)}</small></div></td>
+      <td><div class="state"><span class="status ${cls}">${esc(state)}</span>${a.last_error ? `<div class="state-error">${esc(a.last_error)}</div>` : ''}</div></td>
+      <td>${quotaCell(a)}</td>
+      <td>${resetCell(a)}</td>
+      <td>${rtCell(a)}</td>
+      <td><div class="actions">
+        <button class="btn primary compact" data-action="login" data-id="${a.id}" title="Open headful browser and login">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg>
+          Login
+        </button>
+        <button class="btn soft compact" data-action="device" data-id="${a.id}" title="Codex device code login">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h3M14 9l2 3-2 3"/></svg>
+          Device
+        </button>
+        <button class="icon-btn" data-action="quota" data-id="${a.id}" title="Check Codex limits" aria-label="Check Codex limits"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 4-4 3 2 5-6"/></svg></button>
+        <button class="icon-btn" data-action="cards" data-id="${a.id}" title="Use reset card" aria-label="Use reset card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button>
+        <button class="icon-btn" data-action="rotate" data-id="${a.id}" title="Rotate sticky IP" aria-label="Rotate sticky IP"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="m4 4 5 5"/></svg></button>
+        <button class="icon-btn danger" data-action="delete" data-id="${a.id}" title="Delete account" aria-label="Delete account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/></svg></button>
+      </div></td>
+    </tr>`;
+  }).join('');
+  updateStats(rows);
+}
+function updateStats(rows) {
+  const total = rows.length;
+  const rt = rows.filter(a => a.has_rt).length;
+  const running = rows.filter(a => ['running', 'new'].includes(String(a.status))).length;
+  const reset = rows.reduce((sum, a) => sum + (Number(a.reset_cards && a.reset_cards.available_count) || 0), 0);
+  $('statTotal').textContent = total;
+  $('statRt').textContent = rt;
+  $('statRunning').textContent = running;
+  $('statReset').textContent = reset;
+  $('summary').textContent = `${total} account${total === 1 ? '' : 's'}`;
+  $('liveDot').classList.toggle('busy', running > 0);
+  $('liveText').textContent = running > 0 ? 'Working' : 'Ready';
+}
+async function load() {
+  try {
+    const data = await api('/api/managed-accounts');
+    const rows = data.accounts || [];
+    render(rows);
+    $('lastSync').textContent = 'synced ' + new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    const running = rows.some(a => ['running', 'new'].includes(String(a.status)));
+    if (running && !pollTimer) pollTimer = setInterval(load, 4000);
+    if (!running && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+let devicePoll = null;
+let deviceManagedId = null;
+
+function applyDeviceState(state) {
+  const status = String(state.status || 'starting');
+  const browser = String(state.browser || '');
+  let line = state.message || (status === 'waiting' ? 'Waiting for authorization…' : status);
+  if (status !== 'success' && status !== 'failed') {
+    const preflight = String(state.preflight || '');
+    const login = String(state.login || '');
+    if (browser === 'opened') {
+      if (login === 'needs_otp') line = 'Roxy opened. Account needs an email verification code; enter it in the Roxy window, then continue.';
+      else if (login === 'needs_login') line = 'Roxy opened but auto login failed. Check the account password/TOTP and log in manually.';
+      else if (login.startsWith('error')) line = 'Roxy opened. Auto login failed: ' + login.replace('error:', '').trim() + ' — log in manually.';
+      else if (preflight === 'already' || preflight === 'enabled') line = 'Auto login complete; Device code authorization is on. Enter your 9-digit code in the Roxy window.';
+      else if (preflight === 'needs_login') line = 'Roxy opened but not logged in. Log in and enable Settings → Security → Device code authorization, then enter your code.';
+      else if (preflight === 'not_found') line = 'Roxy opened. Could not find Device code authorization automatically; enable it in Settings → Security, then enter your code.';
+      else if (preflight.startsWith('error')) line = 'Roxy opened. Settings preflight failed: ' + preflight.replace('error:', '').trim() + ' — enable Device code authorization manually.';
+      else line = 'Roxy window opened with account fingerprint/IP. Enter your 9-digit code there.';
+      if (String(state.account_select || '') && status !== 'success' && status !== 'failed') {
+        line = 'Account selected automatically; waiting for authorization…';
+      }
+    }
+    else if (browser.startsWith('opening')) line = 'Opening Roxy with account fingerprint/IP…';
+    else if (browser.startsWith('failed')) line = 'Roxy open failed: ' + browser.replace('failed:', '').trim();
+  }
+  $('deviceStatus').textContent = line;
+  $('deviceStatus').className = 'device-dialog-status' + (status === 'success' ? ' ok' : (status === 'failed' ? ' bad' : ''));
+  $('deviceStage').textContent = state.stage || status || '—';
+  $('devicePage').textContent = state.page_url || state.url || '—';
+  const stageLines = (state.stages || []).map(x => `${x.at ? x.at.replace('T', ' ').slice(5) : ''} ${x.stage || ''}${x.detail ? ' · ' + x.detail : ''}`);
+  const cliLog = state.log ? ['', '— CLI —', state.log] : [];
+  $('deviceLog').textContent = (stageLines.length ? stageLines.join('\n') : 'No stage log yet.') + (cliLog.join('\n'));
+  if (status === 'success') {
+    toast('Device authorized; existing SMS RT kept');
+    if (devicePoll) { clearInterval(devicePoll); devicePoll = null; }
+    setTimeout(() => { if ($('deviceDialog').open) $('deviceDialog').close(); load(); }, 900);
+  }
+  if (status === 'failed' && devicePoll) { clearInterval(devicePoll); devicePoll = null; }
+}
+async function pollDevice() {
+  if (!deviceManagedId) return;
+  try {
+    const state = await api(`/api/managed-accounts/${deviceManagedId}/device-login`);
+    applyDeviceState(state);
+  } catch (err) { toast(err.message); }
+}
+async function openDeviceDialog(id) {
+  deviceManagedId = id;
+  if (!$('deviceDialog').open) $('deviceDialog').showModal();
+  $('deviceStatus').textContent = 'Starting codex login --device-auth…';
+  $('deviceStatus').className = 'device-dialog-status';
+  $('deviceStage').textContent = 'starting';
+  $('devicePage').textContent = '—';
+  $('deviceLog').textContent = 'No stage log yet.';
+  try {
+    const state = await api(`/api/managed-accounts/${id}/device-login`, { method: 'POST', body: '{}' });
+    applyDeviceState(state);
+    if (devicePoll) clearInterval(devicePoll);
+    devicePoll = setInterval(pollDevice, 2000);
+  } catch (err) { toast(err.message); }
+}
+
+async function action(btn) {
+  if (isBusy) return;
+  const id = btn.dataset.id;
+  const act = btn.dataset.action;
+  try {
+    isBusy = true;
+    btn.disabled = true;
+    if (act === 'device') {
+      await openDeviceDialog(id);
+      return;
+    }
+    if (act === 'tag') {
+      const current = btn.dataset.tag || '';
+      const next = prompt('标签 / 备注（留空可清除）', current);
+      if (next === null) return;
+      await api(`/api/managed-accounts/${id}/tag`, { method: 'POST', body: JSON.stringify({ tag: next }) });
+      toast('标签已更新');
+      await load();
+      return;
+    }
+    if (act === 'copy-auth') {
+      const res = await fetch(`/api/managed-accounts/${id}/rt`, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error(`Auth HTTP ${res.status}`);
+      const text = await res.text();
+      await copyText(text);
+      toast('Full auth.json copied to clipboard');
+      return;
+    }
+    if (act === 'copy-rt') {
+      const res = await fetch(`/api/managed-accounts/${id}/rt`, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error(`RT HTTP ${res.status}`);
+      let obj = {};
+      try { obj = await res.json(); } catch (e) {}
+      const token = extractRefreshToken(obj);
+      if (!token) throw new Error('No refresh_token in credential');
+      await copyText(token);
+      toast('refresh_token copied to clipboard');
+      return;
+    }
+    if (act === 'login') {
+      const r = await api(`/api/managed-accounts/${id}/login`, { method: 'POST', body: '{}' });
+      toast(r.message || 'Login started');
+      await load();
+    } else if (act === 'quota') {
+      const r = await api(`/api/managed-accounts/${id}/quota`, { method: 'POST', body: '{}' });
+      toast(`Limits updated${r.plan_type ? ' · ' + r.plan_type : ''}`);
+      await load();
+    } else if (act === 'cards') {
+      const r = await api(`/api/managed-accounts/${id}/reset-cards`);
+      const cards = (r.credits || []).filter(c => String(c.status || '').toLowerCase() === 'available');
+      if (!cards.length) { toast('No available reset cards'); await load(); return; }
+      const card = cards[0];
+      if (!confirm(`Use reset card?\n\n${card.title || card.id}\nExpires: ${card.expires_at || 'unknown'}`)) return;
+      const c = await api(`/api/managed-accounts/${id}/consume-reset-card`, { method: 'POST', body: JSON.stringify({ credit_id: card.id }) });
+      toast(`Reset result: ${c.code}`);
+      await load();
+    } else if (act === 'rotate') {
+      const r = await api(`/api/managed-accounts/${id}/rotate-proxy`, { method: 'POST', body: '{}' });
+      toast(`Sticky IP rotated`);
+      await load();
+    } else if (act === 'delete') {
+      if (!confirm('Delete this managed account?')) return;
+      await api(`/api/managed-accounts/${id}`, { method: 'DELETE' });
+      toast('Account deleted');
+      await load();
+    }
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    isBusy = false;
+    btn.disabled = false;
+  }
+}
+
+$('deviceClose').addEventListener('click', () => {
+  if (devicePoll) { clearInterval(devicePoll); devicePoll = null; }
+  $('deviceDialog').close();
+});
+async function devicePostAction(path, closeAfter = false) {
+  if (!deviceManagedId) return;
+  const res = await api(`/api/managed-accounts/${deviceManagedId}/device-login/${path}`, { method: 'POST', body: '{}' });
+  applyDeviceState(res);
+  if (closeAfter) {
+    if (devicePoll) { clearInterval(devicePoll); devicePoll = null; }
+    $('deviceDialog').close();
+    load();
+  }
+}
+$('deviceContinue').addEventListener('click', async () => {
+  try { await devicePostAction('continue'); toast('Continue sent'); } catch (err) { toast(err.message); }
+});
+$('deviceRestart').addEventListener('click', async () => {
+  try { await devicePostAction('restart'); toast('Device restarted'); } catch (err) { toast(err.message); }
+});
+$('deviceClear').addEventListener('click', async () => {
+  if (!confirm('Clear this device session?')) return;
+  try { await devicePostAction('clear', true); toast('Device session cleared'); } catch (err) { toast(err.message); }
+});
+$('deviceCloseBottom').addEventListener('click', () => {
+  if (devicePoll) { clearInterval(devicePoll); devicePoll = null; }
+  $('deviceDialog').close();
+});
+$('importBtn').addEventListener('click', async () => {
+  const btn = $('importBtn');
+  try {
+    const text = $('importText').value.trim();
+    const proxies = $('proxyText').value.trim();
+    if (!text) return toast('Paste accounts first');
+    btn.disabled = true;
+    const r = await api('/api/managed-accounts/import', { method: 'POST', body: JSON.stringify({ text, proxies }) });
+    $('importHint').textContent = `${r.inserted} added · ${r.updated} updated · ${r.skipped} skipped`;
+    $('importText').value = '';
+    $('proxyText').value = '';
+    await load();
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+$('clearBtn').addEventListener('click', () => {
+  $('importText').value = '';
+  $('proxyText').value = '';
+  $('importHint').textContent = '';
+});
+$('refreshBtn').addEventListener('click', load);
+$('rows').addEventListener('click', (event) => {
+  const btn = event.target.closest('button[data-action]');
+  if (btn) action(btn);
+});
+load();
+</script>
+</body>
+</html>

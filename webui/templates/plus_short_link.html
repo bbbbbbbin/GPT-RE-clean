@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plus 短链 · GPT Registrator</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --bg: #f8f9fa; --surface: #ffffff; --soft: #f7f9fc; --text: #172033;
+      --muted: #667085; --line: #d9e2ec; --blue: #2563eb; --green: #16803c;
+      --red: #c2413a; --amber: #b7791f; --accent-soft: #eef2ff;
+    }
+    body {
+      margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    .topbar {
+      height: 64px; display: flex; align-items: center; justify-content: space-between;
+      padding: 0 24px; background: #fff; border-bottom: 1px solid #eef0f4;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 800; color: #0f172a; }
+    .brand svg { width: 28px; height: 30px; }
+    .top-actions { display: flex; align-items: center; gap: 10px; }
+    .top-actions a, .top-actions button {
+      display: inline-flex; align-items: center; gap: 6px; min-height: 36px;
+      border: 1px solid var(--line); border-radius: 8px; background: #fff;
+      color: #334155; padding: 0 12px; font: inherit; font-size: 13px; font-weight: 700;
+      text-decoration: none; cursor: pointer;
+    }
+    .top-actions a:hover, .top-actions button:hover { background: var(--soft); }
+    main { width: min(880px, calc(100% - 32px)); margin: 28px auto 56px; display: grid; gap: 16px; }
+    .page-head h1 { margin: 0; font-size: 24px; letter-spacing: -0.02em; }
+    .page-head p { margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+    .card {
+      border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+      box-shadow: 0 8px 22px rgba(15, 23, 42, .05); overflow: hidden;
+    }
+    .card-head { padding: 14px 18px; border-bottom: 1px solid var(--line); background: var(--soft); }
+    .card-head strong { display: block; font-size: 14px; }
+    .card-head span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .card-body { padding: 18px; display: grid; gap: 16px; }
+    label.fld { display: block; font-size: 13px; font-weight: 700; }
+    label.fld .hint { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; font-size: 12px; line-height: 1.6; }
+    input, textarea, select {
+      width: 100%; border: 1px solid var(--line); border-radius: 8px;
+      padding: 10px 12px; font: inherit; margin-top: 7px; background: #fff; color: var(--text);
+    }
+    input:focus, textarea:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--blue) 22%, transparent); border-color: var(--blue); }
+    textarea { min-height: 160px; font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 12px; resize: vertical; line-height: 1.55; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+    .row > * { flex: 1; min-width: 180px; }
+    .check { display: flex; align-items: center; gap: 8px; min-height: 40px; font-size: 13px; font-weight: 700; }
+    .check input { width: auto; min-width: 0; margin: 0; }
+    .btn {
+      min-height: 40px; border: 1px solid var(--line); border-radius: 8px; background: #fff;
+      padding: 0 16px; font: inherit; font-size: 13px; font-weight: 800; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; gap: 7px; white-space: nowrap;
+    }
+    .btn:hover { background: var(--soft); }
+    .btn.primary { border-color: var(--blue); background: var(--blue); color: #fff; }
+    .btn.primary:hover { background: #1d4ed8; }
+    .btn:disabled { cursor: not-allowed; opacity: .6; }
+    .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px; border-radius: 999px;
+      background: var(--accent-soft); color: #3730a3; padding: 4px 10px; font-size: 12px; font-weight: 700;
+    }
+    .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #4f46e5; }
+    details.advanced { border-top: 1px dashed var(--line); padding-top: 12px; }
+    details.advanced summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 700; }
+    details.advanced .row { margin-top: 12px; }
+    .status {
+      display: none; align-items: flex-start; gap: 10px; border-radius: 9px;
+      padding: 12px 14px; font-size: 13px; line-height: 1.6; border: 1px solid var(--line); background: var(--soft);
+    }
+    .status.show { display: flex; }
+    .status.ok { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
+    .status.error { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
+    .status.info { border-color: #bfdbfe; background: #eff6ff; color: #1e40af; }
+    .spinner {
+      width: 15px; height: 15px; border-radius: 50%; flex-shrink: 0; margin-top: 2px;
+      border: 2px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .result { display: none; gap: 12px; border-top: 1px solid var(--line); padding-top: 16px; }
+    .result.show { display: grid; }
+    .result label { font-size: 12px; font-weight: 700; color: var(--muted); }
+    .link-row { display: flex; gap: 10px; align-items: stretch; }
+    .link-row input { margin-top: 0; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 8px 14px; color: var(--muted); font-size: 12px; }
+    .meta code { color: #334155; }
+    .footnote { color: var(--muted); font-size: 12px; line-height: 1.7; }
+    @media (max-width: 620px) {
+      .topbar { padding: 0 14px; }
+      .brand span { display: none; }
+      main { width: calc(100% - 20px); margin-top: 16px; }
+      .link-row { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 44 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="logoGrad" x1="10" y1="4" x2="34" y2="44" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#3b66f5"/><stop offset="1" stop-color="#7c3aed"/>
+          </linearGradient>
+        </defs>
+        <path d="M22 3L38.928 12.75V35.25L22 45L5.072 35.25V12.75L22 3Z" fill="url(#logoGrad)"/>
+        <path d="M22 13L30.928 18.25V29.75L22 35L13.072 29.75V18.25L22 13Z" fill="white" fill-opacity="0.92"/>
+      </svg>
+      <span>GPT Registrator</span>
+    </div>
+    <div class="top-actions">
+      <a href="https://chatgpt.com/api/auth/session" target="_blank" rel="noreferrer">打开 session 页面</a>
+      <a href="/">返回控制台</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="page-head">
+      <h1>ChatGPT Plus 短链</h1>
+      <p>填 session 和代理。先检查 <strong>plus-1-month-free</strong> 优惠，确认有优惠后才生成短链；没有优惠会直接停止，不生成。</p>
+    </div>
+
+    <section class="card">
+      <div class="card-head">
+        <strong>生成条件</strong>
+        <span>代理出口自动识别计费国家/币种；短链格式为 chatgpt.com/checkout/{processor_entity}/{checkout_session_id}</span>
+      </div>
+      <div class="card-body">
+        <label class="fld" for="session">
+          Session
+          <span class="hint">粘贴 chatgpt.com/api/auth/session 的完整 JSON，或只粘贴 accessToken。不会保存到本地。</span>
+          <textarea id="session" spellcheck="false" placeholder='{"accessToken":"eyJ...","account":{"id":"..."}}'></textarea>
+        </label>
+
+        <label class="fld" for="proxy">
+          代理
+          <span class="hint">支持 socks5h://user:pass@host:port、http://user:pass@host:port，也支持 host:port 或 host:port:user:pass。直连失败会自动尝试经 10808 链式，首次连接可能较慢。</span>
+          <input id="proxy" spellcheck="false" autocomplete="off" placeholder="socks5h://user:pass@127.0.0.1:10808">
+        </label>
+
+        <div class="actions">
+          <span class="badge">默认检查 plus-1-month-free</span>
+          <button class="btn primary" id="btnGenerate" type="button">检查优惠并生成短链</button>
+          <button class="btn" id="btnClear" type="button">清空</button>
+        </div>
+
+        <details class="advanced">
+          <summary>高级选项（可选）</summary>
+          <div class="row">
+            <label class="fld" for="proxyType">
+              代理类型
+              <select id="proxyType">
+                <option value="auto" selected>自动检测（推荐）</option>
+                <option value="http">HTTP</option>
+                <option value="socks5">SOCKS5</option>
+              </select>
+            </label>
+            <label class="fld" for="chainUpstream">
+              链式上游代理
+              <input id="chainUpstream" spellcheck="false" autocomplete="off" placeholder="留空自动；默认 socks5://127.0.0.1:10808">
+            </label>
+            <label class="check" for="chainOnly">
+              <input type="checkbox" id="chainOnly" checked> 默认只走链式（跳过直连）
+            </label>
+            <label class="fld" for="country">
+              计费国家
+              <input id="country" spellcheck="false" autocomplete="off" placeholder="留空自动，如 PH / JP / US">
+            </label>
+            <label class="fld" for="currency">
+              币种
+              <input id="currency" spellcheck="false" autocomplete="off" placeholder="留空按国家推断，如 PHP / JPY / USD">
+            </label>
+          </div>
+        </details>
+
+        <div class="status" id="status" role="status" aria-live="polite"></div>
+
+        <div class="result" id="result">
+          <label for="shortUrl">短链</label>
+          <div class="link-row">
+            <input id="shortUrl" readonly spellcheck="false">
+            <button class="btn" id="btnCopy" type="button">复制</button>
+            <button class="btn primary" id="btnOpen" type="button">打开</button>
+          </div>
+          <div class="meta" id="meta"></div>
+        </div>
+
+        <div class="footnote">
+          说明：短链需要该 session 对应账号登录后打开付款。优惠资格、最终价格和可用付款方式以官方结账页为准。默认只走 10808 链式；如果代理商是 SOCKS5 而不是 HTTP，请在高级选项把代理类型改成 SOCKS5。
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let currentUrl = "";
+
+    function setStatus(text, tone, spinning) {
+      const el = $("status");
+      el.className = "status show " + (tone || "info");
+      el.innerHTML = "";
+      if (spinning) {
+        const s = document.createElement("span");
+        s.className = "spinner";
+        el.appendChild(s);
+      }
+      const t = document.createElement("span");
+      t.textContent = text;
+      el.appendChild(t);
+    }
+
+    function hideStatus() {
+      $("status").className = "status";
+      $("status").textContent = "";
+    }
+
+    function hideResult() {
+      $("result").classList.remove("show");
+      $("shortUrl").value = "";
+      $("meta").textContent = "";
+      currentUrl = "";
+    }
+
+    function showResult(data) {
+      currentUrl = data.short_url || "";
+      $("shortUrl").value = currentUrl;
+      $("result").classList.add("show");
+      const parts = [];
+      if (data.country) parts.push("国家 " + data.country);
+      if (data.currency) parts.push("币种 " + data.currency);
+      if (data.proxy_ip) parts.push("代理出口 " + data.proxy_ip);
+      if (data.chained) parts.push("10808 链式");
+      if (data.sentinel_used) parts.push("sentinel 已使用");
+      if (data.sentinel_error) parts.push("sentinel 失败，已降级");
+      $("meta").textContent = parts.join(" · ");
+    }
+
+    function setBusy(busy) {
+      $("btnGenerate").disabled = busy;
+      $("btnGenerate").textContent = busy ? "处理中..." : "检查优惠并生成短链";
+    }
+
+    async function generate() {
+      const session = $("session").value.trim();
+      const proxy = $("proxy").value.trim();
+      if (!session) {
+        setStatus("请填写 session", "error", false);
+        $("session").focus();
+        return;
+      }
+      if (!proxy) {
+        setStatus("请填写代理", "error", false);
+        $("proxy").focus();
+        return;
+      }
+
+      hideResult();
+      setBusy(true);
+      setStatus("正在通过 10808 链式连接并查询 plus-1-month-free 优惠（约 10-30 秒）...", "info", true);
+
+      try {
+        const resp = await fetch("/api/plus-link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session,
+            proxy,
+            proxy_type: $("proxyType").value,
+            chain_upstream: $("chainUpstream").value.trim(),
+            chain_only: $("chainOnly").checked,
+            country: $("country").value.trim(),
+            currency: $("currency").value.trim(),
+          }),
+        });
+        if (resp.status === 401) {
+          location.href = "/login?next=" + encodeURIComponent("/plus-link");
+          return;
+        }
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          setStatus(data.error || ("请求失败 HTTP " + resp.status), "error", false);
+          return;
+        }
+        if (!data.ok) {
+          if (data.code === "no_promo") {
+            setStatus("无优惠，已停止生成短链。", "error", false);
+          } else if (data.code === "proxy_failed") {
+            setStatus(data.error || "代理连接失败，请检查协议、端口或账号密码。", "error", false);
+          } else if (data.code === "session_expired") {
+            setStatus(data.error || "session 已失效，请重新获取。", "error", false);
+          } else {
+            setStatus(data.error || "生成失败", "error", false);
+          }
+          return;
+        }
+        setStatus("优惠可用，短链已生成。", "ok", false);
+        showResult(data);
+      } catch (err) {
+        setStatus("请求异常：" + (err && err.message ? err.message : err), "error", false);
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function copyLink() {
+      if (!currentUrl) return;
+      try {
+        await navigator.clipboard.writeText(currentUrl);
+        setStatus("短链已复制。", "ok", false);
+      } catch (_) {
+        const input = $("shortUrl");
+        input.focus();
+        input.select();
+        document.execCommand("copy");
+        setStatus("短链已复制。", "ok", false);
+      }
+    }
+
+    $("btnGenerate").addEventListener("click", generate);
+    $("btnCopy").addEventListener("click", copyLink);
+    $("btnOpen").addEventListener("click", () => {
+      if (currentUrl) window.open(currentUrl, "_blank", "noopener");
+    });
+    $("btnClear").addEventListener("click", () => {
+      $("session").value = "";
+      $("proxy").value = "";
+      $("chainUpstream").value = "";
+      $("chainOnly").checked = false;
+      $("country").value = "";
+      $("currency").value = "";
+      hideStatus();
+      hideResult();
+      $("session").focus();
+    });
+    $("session").addEventListener("keydown", (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") generate();
+    });
+    $("proxy").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") generate();
+    });
+  </script>
+</body>
+</html>
