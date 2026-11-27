@@ -55,6 +55,22 @@ def _seed_uuid(seed: str, salt: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, text))
 
 
+def _is_loopback_proxy(value: str) -> bool:
+    """本地中继本身已带上游链路，再套一层会把 127.0.0.1 发到远端出口。
+
+    典型场景：查活先用 ProxyChainRelay 建好「上游→目标代理」中继，再把
+    127.0.0.1 端口传给 BrowserSession。若这里再次 open_proxy_pool_proxy，
+    中继会请求「经 10808 连到 127.0.0.1」，远端机器上并无该端口，只能超时。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if "://" not in text:
+        text = "//" + text
+    host = (urlparse(text).hostname or "").strip().lower()
+    return host in {"127.0.0.1", "localhost", "::1"}
+
+
 def _seed_int(seed: str, salt: str, *, bits: int = 63) -> int:
     digest = hashlib.sha256(f"{salt}:{seed}".encode("utf-8")).digest()
     nbytes = max(1, (bits + 7) // 8)
@@ -103,24 +119,24 @@ class BrowserSession:
         """
         # proxy=None  → 从池里随机抽（默认行为），并按代理池上游配置决定是否链式
         # proxy=""    → 禁用代理（直连）
-        # proxy="..." → 使用指定代理，不套用代理池上游
+        # proxy="..." → 使用指定代理；远端目标代理按代理池上游链式，本地中继不再套娃
         self._proxy_pool_relay = None
         if proxy is None:
             self.proxy = pick_proxy()
             self.proxy_target = self.proxy
-            if self.proxy:
+            if self.proxy and not _is_loopback_proxy(self.proxy):
                 from core.proxy_chain import open_proxy_pool_proxy
                 transport_proxy, self._proxy_pool_relay = open_proxy_pool_proxy(self.proxy)
             else:
-                transport_proxy = ""
+                transport_proxy = self.proxy or ""
         else:
             self.proxy = proxy
             self.proxy_target = proxy
-            if self.proxy:
+            if self.proxy and not _is_loopback_proxy(self.proxy):
                 from core.proxy_chain import open_proxy_pool_proxy
                 transport_proxy, self._proxy_pool_relay = open_proxy_pool_proxy(self.proxy)
             else:
-                transport_proxy = ""
+                transport_proxy = self.proxy or ""
 
         self.transport_proxy = transport_proxy
         self.fingerprint_seed = str(fingerprint_seed or "").strip()

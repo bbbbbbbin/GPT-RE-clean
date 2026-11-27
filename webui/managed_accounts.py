@@ -48,6 +48,14 @@ def api_login(managed_id: int):
 
 
 
+@bp.post("/api/managed-accounts/<int:managed_id>/open-environment")
+def api_open_environment(managed_id: int):
+    try:
+        return jsonify(svc.open_environment(managed_id))
+    except Exception as exc:
+        return _error(exc)
+
+
 @bp.post("/api/managed-accounts/<int:managed_id>/tag")
 def api_tag(managed_id: int):
     try:

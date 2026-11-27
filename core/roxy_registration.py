@@ -1917,6 +1917,55 @@ def _click_continue_with_password_if_present(driver) -> dict:
         return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
 
 
+def _try_passwordless_on_login_page(driver) -> bool:
+    """仅在登录密码页尝试“一次性验证码”入口。
+
+    注册密码页（create-account/password）必须提交密码，否则新账号会被创建成
+    passwordless（无密码、AT 里 amr 只有 otp），后续 2FA / 密码登录全部受影响。
+    返回 True 表示已经进入邮箱验证码页或登录态。
+    """
+    try:
+        from selenium.webdriver.common.by import By
+        for el in driver.find_elements(By.CSS_SELECTOR, 'button[name="intent"], input[name="intent"]'):
+            if not el.is_displayed():
+                continue
+            blob = " ".join(str(x or "") for x in (
+                el.get_attribute("value"), el.text, el.get_attribute("aria-label")
+            )).lower()
+            if "passwordless" in blob or "one-time" in blob or "one_time" in blob or "one time" in blob:
+                el.click()
+                logger.info("%s 已直接点击一次性验证码入口：%s", _log_prefix(driver), blob[:120])
+                wait_end = time.time() + 20
+                while time.time() < wait_end:
+                    if _is_email_verification_page(driver):
+                        logger.info("%s 一次性验证码入口已进入验证码页", _log_prefix(driver))
+                        return True
+                    if _has_access_token(driver):
+                        logger.info("%s 一次性验证码入口已进入登录态", _log_prefix(driver))
+                        return True
+                    time.sleep(0.5)
+                logger.warning("%s 一次性验证码入口点击后未跳转，继续密码页流程", _log_prefix(driver))
+                break
+    except Exception as exc:
+        logger.debug("%s 直接点击一次性验证码入口失败：%s", _log_prefix(driver), str(exc)[:160])
+
+    passwordless = _click_passwordless_signup_if_present(driver)
+    if not passwordless.get("ok"):
+        return False
+    logger.info("%s 检测到 password 页，已点击一次性验证码入口：detail=%s", _log_prefix(driver), passwordless)
+    wait_end = time.time() + 20
+    while time.time() < wait_end:
+        if _is_email_verification_page(driver):
+            logger.info("%s 一次性验证码入口已进入邮箱验证码页", _log_prefix(driver))
+            return True
+        if _has_access_token(driver):
+            logger.info("%s 一次性验证码入口后已检测到登录态", _log_prefix(driver))
+            return True
+        time.sleep(0.5)
+    logger.info("%s 已点击一次性验证码入口，未立即检测到 OTP 页，交给后续 OTP 阶段继续处理", _log_prefix(driver))
+    return True
+
+
 def _fill_password_page_if_present(driver, email: str, timeout: int = 25) -> str | None:
     """邮箱提交后兼容 create-account/password。返回本次设置的 OpenAI 账号密码；未遇到密码页返回 None。"""
     end = time.time() + timeout
@@ -1967,47 +2016,11 @@ def _fill_password_page_if_present(driver, email: str, timeout: int = 25) -> str
         if not (is_signup_password or is_login_password):
             time.sleep(0.5)
             continue
-        # 新版注册密码页的 “Sign up with a one-time code” 是 button[name=intent]，
-        # 旧文本探测可能漏掉；这里直接按 value/text 原生点击，优先绕过密码提交。
-        try:
-            from selenium.webdriver.common.by import By
-            for el in driver.find_elements(By.CSS_SELECTOR, 'button[name="intent"], input[name="intent"]'):
-                if not el.is_displayed():
-                    continue
-                blob = " ".join(str(x or "") for x in (
-                    el.get_attribute("value"), el.text, el.get_attribute("aria-label")
-                )).lower()
-                if "passwordless" in blob or "one-time" in blob or "one_time" in blob or "one time" in blob:
-                    el.click()
-                    logger.info("%s 已直接点击一次性验证码入口：%s", _log_prefix(driver), blob[:120])
-                    wait_end = time.time() + 20
-                    while time.time() < wait_end:
-                        if _is_email_verification_page(driver):
-                            logger.info("%s 一次性验证码入口已进入验证码页", _log_prefix(driver))
-                            return None
-                        if _has_access_token(driver):
-                            logger.info("%s 一次性验证码入口已进入登录态", _log_prefix(driver))
-                            return None
-                        time.sleep(0.5)
-                    logger.warning("%s 一次性验证码入口点击后未跳转，继续密码页流程", _log_prefix(driver))
-                    break
-        except Exception as exc:
-            logger.debug("%s 直接点击一次性验证码入口失败：%s", _log_prefix(driver), str(exc)[:160])
-        passwordless = _click_passwordless_signup_if_present(driver)
-        if passwordless.get('ok'):
-            logger.info("%s 检测到 password 页，已点击一次性验证码入口：email=%s detail=%s", _log_prefix(driver), email, passwordless)
-            wait_end = time.time() + 20
-            while time.time() < wait_end:
-                if _is_email_verification_page(driver):
-                    logger.info("%s 一次性验证码入口已进入邮箱验证码页", _log_prefix(driver))
-                    return None
-                if _has_access_token(driver):
-                    logger.info("%s 一次性验证码入口后已检测到登录态", _log_prefix(driver))
-                    return None
-                time.sleep(0.5)
-            logger.info("%s 已点击一次性验证码入口，未立即检测到 OTP 页，交给后续 OTP 阶段继续处理", _log_prefix(driver))
-            return None
+        # 注册密码页必须提交密码（新账号默认带密码）；只有登录密码页才允许
+        # 通过“一次性验证码”绕过密码。两者此前不区分，导致新注册账号全部无密码。
         if is_login_password:
+            if _try_passwordless_on_login_page(driver):
+                return None
             logger.info("%s 当前是登录密码页但未找到一次性验证码入口，跳过密码填写并交给 OTP 阶段：state=%s", _log_prefix(driver), last)
             return None
         password = _registration_password()

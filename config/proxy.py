@@ -39,6 +39,7 @@ PROXY_POOL_UPSTREAM_PROXY = ""
 # session 参数（从当前代理用户名中的 -session-<id>- 提取），让该账号拿到新的出口 IP。
 PROXY_POOL_REFRESH_ENABLED = True
 PROXY_POOL_REFRESH_URL = ""
+PROXY_POOL_REFRESH_URLS: list[str] = []
 PROXY_POOL_REFRESH_URL_JP = ""
 PROXY_POOL_REFRESH_TIMEOUT = 15.0
 
@@ -147,7 +148,7 @@ def refresh_proxy_session(proxy_url: str) -> bool:
         return False
     region = str(PROXY_REGION or "US").strip().upper()
     template = str((PROXY_POOL_REFRESH_URL_JP if region == "JP" else PROXY_POOL_REFRESH_URL) or "").strip()
-    if not template:
+    if not template and not PROXY_POOL_REFRESH_URLS:
         return False
     try:
         parsed = urlparse(str(proxy_url or "").strip())
@@ -156,10 +157,22 @@ def refresh_proxy_session(proxy_url: str) -> bool:
         if not match:
             return False
         session = match.group(1)
-        parts = urlsplit(template)
-        query = parse_qs(parts.query, keep_blank_values=True)
-        query["session"] = [session]
-        url = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query, doseq=True), parts.fragment))
+        exact_url = ""
+        for candidate in PROXY_POOL_REFRESH_URLS:
+            try:
+                query = parse_qs(urlsplit(candidate).query, keep_blank_values=True)
+                if (query.get("session") or [""])[0] == session:
+                    exact_url = str(candidate).strip()
+                    break
+            except Exception:
+                continue
+        if exact_url:
+            url = exact_url
+        else:
+            parts = urlsplit(template)
+            query = parse_qs(parts.query, keep_blank_values=True)
+            query["session"] = [session]
+            url = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query, doseq=True), parts.fragment))
         upstream = str(PROXY_POOL_UPSTREAM_PROXY or "").strip()
         proxies = {"http": upstream, "https": upstream} if upstream else None
         import requests
@@ -191,6 +204,7 @@ apply_env_overrides(globals(), {
     'PROXY_POOL_UPSTREAM_PROXY': 'str',
     'PROXY_POOL_REFRESH_ENABLED': 'bool',
     'PROXY_POOL_REFRESH_URL': 'str',
+    'PROXY_POOL_REFRESH_URLS': 'list_str_multiline',
     'PROXY_POOL_REFRESH_URL_JP': 'str',
     'PROXY_POOL_REFRESH_TIMEOUT': 'float',
     'PLAN_CHECK_PROXY_MODE': 'str',

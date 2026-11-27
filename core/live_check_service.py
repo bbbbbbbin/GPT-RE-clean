@@ -21,6 +21,8 @@ _QUEUE_LIMIT = 500
 _EXECUTOR = ThreadPoolExecutor(max_workers=_WORKERS, thread_name_prefix="live-check")
 _QUEUE_SLOTS = threading.BoundedSemaphore(_QUEUE_LIMIT)
 _RUNNING: set[int] = set()
+_FUTURES: dict[int, object] = {}
+_STOP_GENERATION = 0
 _LOCK = threading.Lock()
 _NETWORK_RETRY_HINTS = (
     "403", "429", "502", "503", "504", "proxy", "socks", "timeout",
@@ -90,6 +92,48 @@ def _close_relay(relay) -> None:
             logger.warning("[查活] 代理中继关闭失败", exc_info=True)
 
 
+def _generation() -> int:
+    with _LOCK:
+        return _STOP_GENERATION
+
+
+def _stop_requested(generation: int) -> bool:
+    with _LOCK:
+        return _STOP_GENERATION != generation
+
+
+def _forget_future(account_id: int, future) -> None:
+    with _LOCK:
+        if _FUTURES.get(int(account_id)) is future:
+            _FUTURES.pop(int(account_id), None)
+
+
+def stop_all(reason: str = "已手动停止全部查活") -> dict:
+    """停止全部查活：取消未开始的任务，运行中的任务在下一个检查点退出。"""
+    global _STOP_GENERATION
+    with _LOCK:
+        _STOP_GENERATION += 1
+        generation = _STOP_GENERATION
+        futures = list(_FUTURES.items())
+    cancelled = 0
+    for account_id, future in futures:
+        try:
+            if future.cancel():
+                cancelled += 1
+        except Exception:
+            logger.warning("[查活] 取消排队任务失败: account_id=%s", account_id, exc_info=True)
+    try:
+        marked = db.stop_account_live_checks(reason=reason)
+    except Exception:
+        logger.exception("[查活] 停止任务写库失败")
+        marked = 0
+    logger.warning(
+        "[查活] 已停止全部任务：取消排队 %s，写库 %s，generation=%s，reason=%s",
+        cancelled, marked, generation, reason,
+    )
+    return {"cancelled": cancelled, "marked": marked, "generation": generation, "reason": reason}
+
+
 def complete_authenticated_live_check(*, account_id: int, expected_account: dict, result: dict, session, run_id: str | None = None) -> dict:
     """先持久化新 AT，再同步复用登录会话查套餐；套餐失败不改变查活成功。"""
     if not db.update_account_liveness(account_id, result, expected_account=expected_account, expected_run_id=run_id):
@@ -110,6 +154,7 @@ def complete_authenticated_live_check(*, account_id: int, expected_account: dict
 
 def _run_live_check(*, account_id: int, email: str, proxy: str | None, trigger: str, run_id: str | None = None) -> dict:
     relay = None
+    generation = _generation()
     expected_account = {"email": email}
     completed_in_session = False
     def authenticated(result, session):
@@ -125,6 +170,9 @@ def _run_live_check(*, account_id: int, email: str, proxy: str | None, trigger: 
         if not db.mark_account_live_check_running(account_id, run_id=run_id):
             _safe_append_log(email, "[查活] 账号已删除或查活状态已被重置，取消执行")
             return {"ok": False, "status": "failed", "error": "账号已删除或查活状态已被重置"}
+        if _stop_requested(generation):
+            _safe_append_log(email, "[查活] 已被手动停止，跳过执行")
+            return {"ok": False, "status": "failed", "error": "查活已被手动停止"}
         # 查活必须沿用账号注册时记录的邮箱来源。不能只调用
         # resolve_email_source(email)：Remail 等临时邮箱的上下文只在领取进程
         # 内存中存在，服务重启后按当前 EMAIL_SOURCE 推断会把来源判错。
@@ -133,17 +181,22 @@ def _run_live_check(*, account_id: int, email: str, proxy: str | None, trigger: 
             result = {"ok": False, "status": "failed", "error": "账号已删除或邮箱已变更，丢弃旧查活任务"}
             db.update_account_liveness(account_id, result, expected_account=expected_account, expected_run_id=run_id)
             return result
-        if not str(proxy or "").strip():
-            proxy = str(account.get("proxy_used") or "").strip() or None
-            if proxy:
-                _safe_append_log(email, "[查活] 使用账号注册时保存的代理")
         from config import proxy as proxy_cfg
         candidates = _configured_live_check_proxies(proxy_cfg)
-        route = resolve_plan_check_route(explicit_proxy=proxy)
-        # 查活规则独立于套餐查询的 direct/auto 选择：只要任一代理池有数据，
-        # 就禁止直连，并从池中随机选择一个出口。
-        if candidates and not str(route.get("proxy") or "").strip():
+        if candidates:
+            # 只要配置了查活代理池，就强制使用池内当前代理。账号表里的
+            # proxy_used 是注册时的旧出口，代理账号/会话过期后认证必失败，
+            # 不能让它抢在代理池前面。
             route = _live_proxy_route(random.choice(candidates), proxy_cfg)
+            if str(proxy or "").strip():
+                _safe_append_log(email, "[查活] 已配置代理池，忽略调用方传入的代理")
+            _safe_append_log(email, "[查活] 使用查活代理池（不复用账号注册时保存的旧代理）")
+        else:
+            if not str(proxy or "").strip():
+                proxy = str(account.get("proxy_used") or "").strip() or None
+                if proxy:
+                    _safe_append_log(email, "[查活] 未配置查活代理池，使用账号注册时保存的代理")
+            route = resolve_plan_check_route(explicit_proxy=proxy)
         selected_proxy = str(route.get("proxy") or "").strip()
         timeout = float(getattr(proxy_cfg, "PLAN_CHECK_TIMEOUT", 15.0) or 15.0)
         expected_account = {"email": email, "access_token": account.get("access_token", "")}
@@ -163,6 +216,9 @@ def _run_live_check(*, account_id: int, email: str, proxy: str | None, trigger: 
         used_proxies: set[str] = set()
         result: dict = {"ok": False, "status": "failed", "error": "查活未执行"}
         for route_attempt in range(1, max_routes + 1):
+            if _stop_requested(generation):
+                _safe_append_log(email, "[查活] 已被手动停止，停止后续出口尝试")
+                return {"ok": False, "status": "failed", "error": "查活已被手动停止"}
             selected_proxy = str(route.get("proxy") or "").strip()
             if selected_proxy:
                 used_proxies.add(selected_proxy)
@@ -187,6 +243,9 @@ def _run_live_check(*, account_id: int, email: str, proxy: str | None, trigger: 
             if relay is not None:
                 _close_relay(relay)
                 relay = None
+            if _stop_requested(generation):
+                _safe_append_log(email, "[查活] 已被手动停止，丢弃本次结果")
+                return {"ok": False, "status": "failed", "error": "查活已被手动停止"}
             if not _retryable_live_check_result(result):
                 break
 
@@ -213,6 +272,9 @@ def _run_live_check(*, account_id: int, email: str, proxy: str | None, trigger: 
                 route = resolve_plan_check_route(explicit_proxy="")
                 continue
             break
+        if _stop_requested(generation):
+            _safe_append_log(email, "[查活] 已被手动停止，丢弃本次结果")
+            return {"ok": False, "status": "failed", "error": "查活已被手动停止"}
         if not completed_in_session and not db.update_account_liveness(account_id, result, expected_account=expected_account, expected_run_id=run_id):
             return {"ok": False, "status": "failed", "error": "账号已删除或邮箱/AT 已变更，丢弃旧查活结果"}
         if result.get("ok"):
@@ -309,7 +371,10 @@ def enqueue_account_live_check(*, account_id: int, email: str, trigger: str = "m
             trigger=str(trigger or "manual"),
             run_id=run_id,
         )
+        with _LOCK:
+            _FUTURES[account_id] = future
         future.add_done_callback(lambda done: _release_cancelled_check(done, account_id, run_id))
+        future.add_done_callback(lambda done: _forget_future(account_id, done))
     except Exception as exc:
         with _LOCK:
             _RUNNING.discard(account_id)

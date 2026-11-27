@@ -989,6 +989,13 @@ def create_app(auth_code: str | None = None) -> Flask:
         }), 202
 
 
+    @app.post("/api/accounts/check-live-stop")
+    def api_accounts_check_live_stop():
+        """停止全部查活：取消排队任务，运行中的任务在当前网络请求结束后退出。"""
+        data = request.get_json(silent=True) or {}
+        reason = str(data.get("reason") or "已手动停止全部查活").strip()[:200] or "已手动停止全部查活"
+        return jsonify({"ok": True, **live_check_service.stop_all(reason=reason)})
+
     @app.post("/api/accounts/check-plan")
     def api_account_check_plan():
         """把单账号套餐查询加入后台队列。Body {account_id|email, proxy?, timezone_offset_min?}"""

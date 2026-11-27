@@ -323,6 +323,25 @@ def wait_for_otp(
     if source == "xigua":
         from core.xigua_client import fetch_latest_otp
         return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
+    # 托管账号（email_source=managed）通常只绑定了密码+TOTP，没有接入任何邮箱池；
+    # 兜底到 outlook 只会抛 “未找到账号上下文”。这里直接改走手动验证码通道。
+    try:
+        from core import db as _db
+        _account = _db.get_account_by_email(email) or {}
+        _is_managed = str(_account.get("email_source") or "").strip().lower() == "managed"
+        _has_mailbox = bool(_db.get_outlook_by_email(email) or _db.get_generic_api_email_by_email(email))
+    except Exception:
+        _is_managed = False
+        _has_mailbox = True
+    if _is_managed and not _has_mailbox:
+        from core.manual_otp import wait_for_manual_otp
+        manual_timeout = int(max_wait if max_wait is not None else (getattr(_email_cfg, "OTP_MAX_WAIT", 180) or 180))
+        logger.warning(
+            "[EmailProvider] %s 为托管账号且未接入邮箱池，改用手动验证码通道（timeout=%ss）",
+            email,
+            manual_timeout,
+        )
+        return wait_for_manual_otp(email, timeout=manual_timeout)
     from core.outlook_client import fetch_latest_otp
     return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
 

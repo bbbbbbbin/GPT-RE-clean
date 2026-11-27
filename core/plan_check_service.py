@@ -80,9 +80,26 @@ def _run_plan_check(
             return {"ok": False, "error": "账号已删除、邮箱/AT 已变更或套餐任务已被重置"}
         if not str(proxy or "").strip():
             account_row = db.get_account(account_id) or {}
-            proxy = str(account_row.get("proxy_used") or "").strip() or None
-            if proxy:
-                logger.info("[Plan] 使用账号注册时保存的代理: %s", email)
+            saved_proxy = str(account_row.get("proxy_used") or "").strip()
+            if saved_proxy:
+                try:
+                    from config import proxy as proxy_cfg
+
+                    current_pool = {
+                        str(item).strip()
+                        for item in (proxy_cfg.active_proxy_pool() or [])
+                        if str(item).strip()
+                    }
+                except Exception:
+                    current_pool = set()
+                if current_pool and saved_proxy not in current_pool:
+                    logger.warning(
+                        "[Plan] 账号保存的代理已不在当前代理池，回退套餐查询池: %s",
+                        email,
+                    )
+                else:
+                    proxy = saved_proxy
+                    logger.info("[Plan] 使用账号注册时保存的代理: %s", email)
         session_options = {"session": session} if session is not None else {}
         result = check_account_plan(
             access_token,

@@ -446,6 +446,14 @@ def _extract_structured_api_code(text: str, after_ts: float | None = None) -> tu
         or data.get("timestamp")
     )
     msg_ts = _parse_generic_api_ts(ts_raw)
+    meta = {
+        "source": "structured_api",
+        "received_at": ts_raw,
+        "msg_ts": msg_ts,
+        "subject": data.get("subject"),
+        "from": data.get("from") or data.get("fromAddress") or data.get("sender"),
+        "stale": False,
+    }
     if after_ts and msg_ts and msg_ts + 2 < after_ts:
         logger.debug(
             "[GenericAPI] structured API 跳过旧验证码: code=%s ts=%s after=%s subject=%r",
@@ -454,15 +462,14 @@ def _extract_structured_api_code(text: str, after_ts: float | None = None) -> tu
             time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(after_ts)),
             str(data.get("subject") or "")[:80],
         )
-        return None
+        # 关键：返回“空 code + stale 标记”，而不是 None。
+        # 若返回 None，调用方会退回到 _extract_code(text) 从原始 JSON 里
+        # 用正则把同一个旧验证码再抠回来，导致 after_ts 时间过滤被绕过——
+        # 这正是“注册码被当新码提交、/email-otp/validate 返回 401”的根因。
+        meta["stale"] = True
+        return "", meta
 
-    return code, {
-        "source": "structured_api",
-        "received_at": ts_raw,
-        "msg_ts": msg_ts,
-        "subject": data.get("subject"),
-        "from": data.get("from") or data.get("fromAddress") or data.get("sender"),
-    }
+    return code, meta
 
 
 def _fetch_yangyang_otp(
@@ -880,7 +887,17 @@ def fetch_latest_otp(
                         after_ts=None if public_inbox_api_url else after_ts,
                     )
                 structured_meta = structured[1] if structured else {}
-                code = structured[0] if structured else _extract_code(text)
+                if structured and structured_meta.get("stale"):
+                    # 接口里最新的仍是早于取码基准的旧码：绝不能退回原始正则
+                    # 提取（会抠回同一个旧码），本轮视为“暂无新码”，继续轮询。
+                    code = ""
+                    logger.info(
+                        "[GenericAPI] 取码接口仅有旧验证码（早于取码基准），继续等待新验证码：ts=%s after=%s",
+                        structured_meta.get("received_at"),
+                        time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(after_ts)) if after_ts else "-",
+                    )
+                else:
+                    code = structured[0] if structured else _extract_code(text)
                 if mailbox_mismatch:
                     code = None
                 if code:

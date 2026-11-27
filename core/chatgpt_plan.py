@@ -442,12 +442,12 @@ def check_account_plan(
     relay = None
     try:
         # 首次按代理真实出口自动生成语言/时区画像，随后整条查询链固定不漂移。
+        # BrowserSession 会按 PROXY_POOL_UPSTREAM_PROXY 自行建立链式 relay；
+        # 这里再调用 open_plan_check_proxy 会把本地 relay 当目标代理二次套链，
+        # 导致 CONNECT tunnel 502。直接传原始目标代理即可。
         if owns_session:
-            effective_proxy, relay = open_plan_check_proxy(
-                route, route["proxy"], timeout=timeout_seconds,
-            )
             env = BrowserSession(
-                proxy=effective_proxy, detect_exit_geo=True, fingerprint_seed=task_seed,
+                proxy=route["proxy"], detect_exit_geo=True, fingerprint_seed=task_seed,
             )
         effective_tz = str(timezone_offset_min or "").strip()
         if not effective_tz or effective_tz == "-":

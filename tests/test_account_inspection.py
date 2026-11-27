@@ -999,6 +999,59 @@ print('acquired' if lease else 'busy', flush=True)
         self.assertEqual(db.get_account(2)['access_token'], 'fresh-token')
         plan.assert_not_called()
 
+    def test_live_check_prefers_configured_pool_over_saved_proxy_used(self):
+        db._ensure_sqlite()
+        with closing(db._sqlite_conn()) as conn, conn:
+            conn.execute("UPDATE accounts SET payload=json_set(payload, '$.proxy_used', "
+                         "'socks5://old-dead-proxy:9000') WHERE id=2")
+        module = service.live_check_service
+        seen = {}
+        def open_route(route, selected, *, timeout):
+            seen['route'] = route
+            seen['proxy'] = selected
+            return None, None
+        with patch.object(module, 'check_account_liveness',
+                          return_value={'ok': True, 'access_token': 'fresh-token', 'plan_result': {'ok': True}}), \
+             patch.object(module, '_append_log'), \
+             patch.object(module, '_configured_live_check_proxies',
+                          return_value=['socks5://pool-live:10000']), \
+             patch.object(module, '_live_proxy_route',
+                          side_effect=lambda url, cfg: {'proxy': url, 'network_route': 'proxy',
+                                                        'proxy_mode': 'proxy_pool'}), \
+             patch.object(module, 'resolve_plan_check_route') as legacy, \
+             patch.object(module, 'open_plan_check_proxy', side_effect=open_route), \
+             patch.object(plan_service, 'enqueue_account_plan_check', return_value=True):
+            queued = module.enqueue_account_live_check(
+                account_id=2, email='expired@example.test', proxy=None, return_future=True)
+            result = queued['future'].result(timeout=5)
+        self.assertTrue(result['ok'])
+        legacy.assert_not_called()
+        self.assertEqual(seen['proxy'], 'socks5://pool-live:10000')
+
+    def test_live_check_uses_saved_proxy_only_without_configured_pool(self):
+        db._ensure_sqlite()
+        with closing(db._sqlite_conn()) as conn, conn:
+            conn.execute("UPDATE accounts SET payload=json_set(payload, '$.proxy_used', "
+                         "'socks5://old-dead-proxy:9000') WHERE id=2")
+        module = service.live_check_service
+        seen = {}
+        def open_route(route, selected, *, timeout):
+            seen['proxy'] = selected
+            return None, None
+        with patch.object(module, 'check_account_liveness',
+                          return_value={'ok': True, 'access_token': 'fresh-token', 'plan_result': {'ok': True}}), \
+             patch.object(module, '_append_log'), \
+             patch.object(module, '_configured_live_check_proxies', return_value=[]), \
+             patch.object(module, 'resolve_plan_check_route', return_value={'proxy': 'x'}) as legacy, \
+             patch.object(module, 'open_plan_check_proxy', side_effect=open_route), \
+             patch.object(plan_service, 'enqueue_account_plan_check', return_value=True):
+            queued = module.enqueue_account_live_check(
+                account_id=2, email='expired@example.test', proxy=None, return_future=True)
+            result = queued['future'].result(timeout=5)
+        self.assertTrue(result['ok'])
+        legacy.assert_called_once_with(explicit_proxy='socks5://old-dead-proxy:9000')
+        self.assertEqual(seen['proxy'], 'x')
+
     def test_relay_cleanup_error_does_not_discard_successful_live_result(self):
         run, _ = db.create_account_inspection([2], workers=1)
         relay = Mock()

@@ -2218,6 +2218,134 @@ def update_account_totp_secret(acc_id: int, result: dict | None = None) -> bool:
         return True
 
 
+def update_account_credentials(
+    acc_id: int,
+    *,
+    password: str | None = None,
+    access_token: str | None = None,
+    totp_secret: str | None = None,
+    session: dict | None = None,
+    totp_ok: bool = False,
+    message: str | None = None,
+) -> bool:
+    """写回账号密码 / 最新 AT / TOTP secret。
+
+    批量补密码后旧 AT 会被服务端吊销，必须同时写回新 AT，避免账号被误判失效。
+    只改目标行（``BEGIN IMMEDIATE``），不与 WebUI 的全量重写互相覆盖。
+    """
+    with _LOCK, _account_for_update(acc_id) as row:
+        if row is None:
+            return False
+        now = _now()
+        if password:
+            # 账号表顶层 ``password`` 是邮箱（Outlook 等）素材密码，不是 ChatGPT 密码。
+            # ChatGPT 自身密码的规范位置是 ``extra_json.registration_password``，
+            # 登录/查活（codex_oauth、account_liveness）都从这里读取。
+            extra: dict = {}
+            raw_extra = row.get("extra_json")
+            if isinstance(raw_extra, str) and raw_extra.strip():
+                try:
+                    loaded = json.loads(raw_extra)
+                    extra = loaded if isinstance(loaded, dict) else {}
+                except (TypeError, ValueError):
+                    extra = {}
+            elif isinstance(raw_extra, dict):
+                extra = dict(raw_extra)
+            extra["registration_password"] = str(password)
+            row["extra_json"] = json.dumps(extra, ensure_ascii=False)
+        if totp_secret:
+            row["totp_secret"] = str(totp_secret)
+        if totp_ok:
+            row["totp_setup_status"] = "success"
+            row["totp_setup_ok"] = True
+            row["totp_setup_checked_at"] = now
+            row["totp_setup_completed_at"] = now
+            row["totp_setup_error"] = None
+            if message:
+                row["totp_setup_message"] = message
+        token = str(access_token or "").strip()
+        if token:
+            row["access_token"] = token
+            try:
+                from core.chatgpt_plan import token_claims
+                claims = token_claims(token)
+            except (TypeError, ValueError, AttributeError, OverflowError, OSError):
+                claims = {}
+            row["token_expired"] = claims.get("token_expired")
+            row["token_expires_at"] = claims.get("token_expires_at")
+        session = session or {}
+        user = session.get("user") or {}
+        account = session.get("account") or {}
+        if user.get("id"):
+            row["user_id"] = user.get("id")
+        if user.get("name") is not None:
+            row["user_name"] = user.get("name")
+        if account.get("planType"):
+            row["plan_type"] = account.get("planType")
+        if session.get("expires"):
+            row["expires_at"] = session.get("expires")
+        row["updated_at"] = now
+        row["copy_line"] = _account_line(row)
+        return True
+
+
+def update_account_proxy_used(acc_id: int, proxy: str) -> bool:
+    """更新账号使用的代理（`proxy_used`）。
+
+    代理是会话级粘性节点，节点失效（502 / 证书链损坏）时只换代理即可，
+    不会影响 access token。
+    """
+    target = str(proxy or "").strip()
+    if not target:
+        return False
+    with _LOCK, _account_for_update(acc_id) as row:
+        if row is None:
+            return False
+        row["proxy_used"] = target
+        row["updated_at"] = _now()
+        return True
+
+
+def migrate_account_password_field(acc_id: int) -> str:
+    """把误写到顶层 ``password`` 的 ChatGPT 密码迁到 ``extra_json.registration_password``。
+
+    顶层 ``password`` 是邮箱素材（Outlook）密码；只有确认该值就是 ChatGPT 密码时
+    才能调用本函数（批量补密码脚本早期版本写错了位置）。
+    返回 ``written`` / ``already`` / ``skipped`` / ``missing``。
+    """
+    with _LOCK, _account_for_update(acc_id) as row:
+        if row is None:
+            return "missing"
+        top = str(row.get("password") or "").strip()
+        if str(row.get("email_source") or "").strip().lower() == "outlook":
+            # Outlook 账号顶层就是邮箱密码，绝不能迁移/清空。
+            return "skipped"
+        current = _extract_registration_password(row)
+        if current and current != top:
+            return "already"
+        extra: dict = {}
+        raw_extra = row.get("extra_json")
+        if isinstance(raw_extra, str) and raw_extra.strip():
+            try:
+                loaded = json.loads(raw_extra)
+                extra = loaded if isinstance(loaded, dict) else {}
+            except (TypeError, ValueError):
+                extra = {}
+        elif isinstance(raw_extra, dict):
+            extra = dict(raw_extra)
+        if top and not current:
+            extra["registration_password"] = top
+            row["extra_json"] = json.dumps(extra, ensure_ascii=False)
+            result = "written"
+        else:
+            result = "already"
+        if top:
+            row["password"] = ""
+        row["updated_at"] = _now()
+        row["copy_line"] = _account_line(row)
+        return result
+
+
 def recover_interrupted_totp_setups() -> int:
     """服务启动时恢复上次进程中断的 2FA 设置状态。"""
     with _LOCK:
@@ -2284,6 +2412,27 @@ def recover_interrupted_live_checks() -> int:
         if recovered:
             _save_accounts(rows)
         return recovered
+
+
+def stop_account_live_checks(reason: str = "已手动停止查活") -> int:
+    """手动停止全部查活：排队/运行中的状态统一改为失败，运行线程随后自行退出。"""
+    with _LOCK:
+        rows = _load_accounts()
+        stopped = 0
+        now = _now()
+        text = str(reason or "已手动停止查活").strip()[:500] or "已手动停止查活"
+        for row in rows:
+            if row.get("live_check_status") not in {"queued", "running"}:
+                continue
+            row["live_check_status"] = "failed"
+            row["live_check_ok"] = False
+            row["live_check_error"] = text
+            row["live_checked_at"] = now
+            row["updated_at"] = now
+            stopped += 1
+        if stopped:
+            _save_accounts(rows)
+        return stopped
 
 
 def mark_account_live_check_running(acc_id: int, *, run_id: str | None = None) -> bool:

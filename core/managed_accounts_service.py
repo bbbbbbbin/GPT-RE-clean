@@ -5,6 +5,7 @@ import csv
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import shutil
@@ -22,6 +23,8 @@ from urllib.parse import parse_qs, urlparse
 from cryptography.fernet import Fernet, InvalidToken
 
 from core import db
+
+LOG = logging.getLogger(__name__)
 
 _LOCK = threading.RLock()
 _KEY_LOCK = threading.Lock()
@@ -465,10 +468,6 @@ def _login_worker(managed_id: int) -> None:
             existing_opened=opened,
             reuse_existing_profile=True,
         )
-        try:
-            _close_managed_browser(profile_id)
-        except Exception:
-            pass
         file_path = str(result.get("file_path") or "")
         filename = file_path.rsplit("/", 1)[-1] if file_path else ""
         status = "success" if result.get("ok") else ("stopped" if result.get("status") == "stopped" else "failed")
@@ -756,6 +755,32 @@ def _openbrowser_profile_exists(profile_id: str) -> bool | None:
         return None
 
 
+def _enable_continue_where_left_off(profile_id: str) -> bool:
+    profile_id = str(profile_id or "").strip()
+    appdata = str(os.environ.get("APPDATA") or "").strip()
+    if not profile_id or not appdata:
+        return False
+    prefs_path = Path(appdata) / "openbrowser" / "browser-profiles-v2" / profile_id / "Default" / "Preferences"
+    if not prefs_path.exists():
+        return False
+    try:
+        data = json.loads(prefs_path.read_text(encoding="utf-8") or "{}")
+        if not isinstance(data, dict):
+            data = {}
+        session = data.get("session") if isinstance(data.get("session"), dict) else {}
+        session["restore_on_startup"] = 1
+        session["startup_urls"] = []
+        data["session"] = session
+        prof = data.get("profile") if isinstance(data.get("profile"), dict) else {}
+        prof["exit_type"] = "Normal"
+        prof["exited_cleanly"] = True
+        data["profile"] = prof
+        prefs_path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
 def _save_roxy_profile_id(email: str, profile_id: str) -> None:
     profile_id = str(profile_id or "").strip()
     if not email or not profile_id:
@@ -799,6 +824,138 @@ def _openbrowser_update_proxy(profile_id: str, proxy_url: str) -> bool:
 
 
 _PROFILE_RELAYS: dict[str, dict] = {}
+_PROXY_HEALTH: dict[str, tuple[bool, float]] = {}
+_PROXY_HEALTH_TTL = 60.0
+_PROXY_PROBE_URL = "https://auth.openai.com/log-in"
+
+
+def _probe_proxy_transport(transport: str, timeout: float = 12.0) -> bool:
+    """通过本地中继访问授权页，确认该出口能被 OpenAI 接受。"""
+    transport = str(transport or "").strip()
+    if not transport:
+        return True
+    try:
+        import requests
+
+        with requests.Session() as http:
+            http.trust_env = False
+            resp = http.get(
+                _PROXY_PROBE_URL,
+                proxies={"http": transport, "https": transport},
+                timeout=(8.0, timeout),
+                allow_redirects=False,
+                stream=True,
+            )
+            status = int(resp.status_code)
+            resp.close()
+        return status < 400
+    except Exception:
+        return False
+
+
+def _proxy_target_healthy(
+    target: str,
+    transport: str,
+    *,
+    force: bool = False,
+    timeout: float = 12.0,
+) -> bool:
+    target = str(target or "").strip()
+    if not target:
+        return True
+    now = time.time()
+    if not force:
+        cached = _PROXY_HEALTH.get(target)
+        if cached and now - cached[1] < _PROXY_HEALTH_TTL:
+            return bool(cached[0])
+    ok = _probe_proxy_transport(transport, timeout=timeout)
+    _PROXY_HEALTH[target] = (ok, now)
+    return ok
+
+
+def _alternative_proxy_targets(exclude: str) -> list[str]:
+    try:
+        from config import proxy as proxy_cfg
+
+        pool = [str(item).strip() for item in (proxy_cfg.active_proxy_pool() or []) if str(item).strip()]
+    except Exception:
+        return []
+    used = set(_used_proxies())
+    fresh = [item for item in pool if item != exclude and item not in used]
+    others = [item for item in pool if item != exclude and item in used]
+    return fresh + others
+
+
+def _persist_account_proxy(account: dict, target: str) -> None:
+    target = str(target or "").strip()
+    if not target:
+        return
+    account["proxy_used"] = target
+    managed_id = account.get("id")
+    if managed_id:
+        try:
+            _update_managed(int(managed_id), proxy_used=target)
+        except Exception:
+            pass
+    try:
+        _sync_registration_account(account)
+    except Exception:
+        pass
+
+
+def _open_healthy_proxy(account: dict, target: str):
+    """打开代理中继并验证出口；失效时先刷新 session，再切换代理池。"""
+    from core.proxy_chain import open_proxy_pool_proxy
+
+    target = str(target or "").strip()
+    if not target:
+        return "", "", None
+    transport, relay = open_proxy_pool_proxy(target)
+    if _proxy_target_healthy(target, str(transport or "")):
+        return target, str(transport or ""), relay
+    if relay is not None:
+        try:
+            relay.close()
+        except Exception:
+            pass
+    try:
+        from core.proxy_utils import mask_proxy_url
+
+        masked = mask_proxy_url(target)
+    except Exception:
+        masked = "***"
+    LOG.warning("代理出口不可用，尝试刷新粘性 session：%s", masked)
+    try:
+        from config import proxy as proxy_cfg
+
+        for attempt in range(2):
+            proxy_cfg.refresh_proxy_session(target)
+            transport, relay = open_proxy_pool_proxy(target)
+            if _proxy_target_healthy(target, str(transport or ""), force=True):
+                LOG.info("刷新后代理出口恢复：%s", masked)
+                return target, str(transport or ""), relay
+            if relay is not None:
+                try:
+                    relay.close()
+                except Exception:
+                    pass
+            LOG.warning("第 %s 次刷新后仍不可用：%s", attempt + 1, masked)
+    except Exception:
+        pass
+    for candidate in _alternative_proxy_targets(target):
+        transport, relay = open_proxy_pool_proxy(candidate)
+        if _proxy_target_healthy(candidate, str(transport or ""), force=True, timeout=8.0):
+            LOG.warning("代理出口切换：%s -> 新 session", masked)
+            _persist_account_proxy(account, candidate)
+            return candidate, str(transport or ""), relay
+        if relay is not None:
+            try:
+                relay.close()
+            except Exception:
+                pass
+    LOG.error("代理池全部不可用，暂用原代理继续：%s", masked)
+    transport, relay = open_proxy_pool_proxy(target)
+    return target, str(transport or ""), relay
 
 
 def _managed_profile_transport(profile_id: str, account: dict) -> dict:
@@ -806,7 +963,14 @@ def _managed_profile_transport(profile_id: str, account: dict) -> dict:
     target = str(account.get("proxy_used") or "").strip()
     item = _PROFILE_RELAYS.get(profile_id) if profile_id else None
     if item and item.get("target") == target and item.get("relay") is not None:
-        return item
+        if _proxy_target_healthy(target, str(item.get("transport") or "")):
+            return item
+        try:
+            item["relay"].close()
+        except Exception:
+            pass
+        _PROFILE_RELAYS.pop(profile_id, None)
+        item = None
     if item and item.get("relay") is not None:
         try:
             item["relay"].close()
@@ -815,9 +979,7 @@ def _managed_profile_transport(profile_id: str, account: dict) -> dict:
         _PROFILE_RELAYS.pop(profile_id, None)
     if not target:
         return {"transport": "", "relay": None, "target": ""}
-    from core.proxy_chain import open_proxy_pool_proxy
-
-    transport, relay = open_proxy_pool_proxy(target)
+    target, transport, relay = _open_healthy_proxy(account, target)
     item = {"transport": str(transport or ""), "relay": relay, "target": target}
     if profile_id:
         _PROFILE_RELAYS[profile_id] = item
@@ -836,6 +998,7 @@ def _ensure_managed_profile(account: dict):
     one_per_account = bool(getattr(roxy_cfg, "ROXY_ONE_PROFILE_PER_ACCOUNT", False))
 
     def _open_existing(pid: str):
+        _enable_continue_where_left_off(pid)
         roxy_cfg.ROXY_ONE_PROFILE_PER_ACCOUNT = False
         try:
             return client.open_profile(pid)
@@ -844,6 +1007,12 @@ def _ensure_managed_profile(account: dict):
 
     if profile_id:
         item = _managed_profile_transport(profile_id, account)
+        # 先关闭旧窗口再写入代理：运行中的 Chrome 不会重新读取代理配置，
+        # 桥接/服务重启后复用旧窗口会得到已失效的本地中继端口。
+        try:
+            client.close_profile(profile_id)
+        except Exception:
+            pass
         if item.get("transport"):
             _openbrowser_update_proxy(profile_id, str(item["transport"]))
         return _open_existing(profile_id), profile_id
@@ -853,9 +1022,7 @@ def _ensure_managed_profile(account: dict):
     relay = None
     transport = ""
     if target:
-        from core.proxy_chain import open_proxy_pool_proxy
-
-        transport, relay = open_proxy_pool_proxy(target)
+        target, transport, relay = _open_healthy_proxy(account, target)
         payload["proxyInfo"] = _proxy_url_to_roxy_info(transport)
     profile_id = client.create_profile(payload or None)
     if relay is not None:
@@ -1095,8 +1262,13 @@ def _open_device_browser(managed_id: int, session: dict, account: dict) -> None:
         if profile_id:
             item = _managed_profile_transport(profile_id, account)
             relay = item.get("relay")
+            try:
+                client.close_profile(profile_id)
+            except Exception:
+                pass
             if item.get("transport"):
                 _openbrowser_update_proxy(profile_id, str(item["transport"]))
+            _enable_continue_where_left_off(profile_id)
             roxy_cfg.ROXY_ONE_PROFILE_PER_ACCOUNT = False
             try:
                 opened = client.open_profile(profile_id)
@@ -1107,10 +1279,9 @@ def _open_device_browser(managed_id: int, session: dict, account: dict) -> None:
             payload = {}
             target = str(account.get("proxy_used") or "").strip()
             transport = ""
+            relay = None
             if target:
-                from core.proxy_chain import open_proxy_pool_proxy
-
-                transport, relay = open_proxy_pool_proxy(target)
+                target, transport, relay = _open_healthy_proxy(account, target)
                 payload["proxyInfo"] = _proxy_url_to_roxy_info(transport)
             profile_id = client.create_profile(payload or None)
             if relay is not None:
@@ -1118,6 +1289,7 @@ def _open_device_browser(managed_id: int, session: dict, account: dict) -> None:
             session["profile_id"] = profile_id
             session["profile_created"] = True
             _save_roxy_profile_id(str(account.get("email") or ""), profile_id)
+            _enable_continue_where_left_off(profile_id)
             roxy_cfg.ROXY_ONE_PROFILE_PER_ACCOUNT = False
             try:
                 opened = client.open_profile(profile_id)
@@ -1423,6 +1595,18 @@ def device_login_status(managed_id: int) -> dict:
         if not session:
             return {"ok": False, "status": "idle", "message": "没有设备码登录会话"}
         return _device_public(session)
+
+
+def open_environment(managed_id: int) -> dict:
+    account = get_account(managed_id)
+    if not account:
+        raise ValueError("账号不存在")
+    opened, profile_id = _ensure_managed_profile(account)
+    return {
+        "ok": True,
+        "profile_id": profile_id,
+        "message": "Roxy environment opened",
+    }
 
 
 def cancel_device_login(managed_id: int, reason: str = "cleared by user") -> dict:

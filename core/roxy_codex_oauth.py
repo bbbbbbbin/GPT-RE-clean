@@ -581,8 +581,12 @@ def _fill_email_and_otp(driver, email: str, otp_provider, auth_url: str) -> None
     used_codes: set[str] = set()
     max_otp_attempts = 3
 
-    def _restart_email_otp_flow(reason: str) -> None:
-        """Codex Auth 上直接点 resend 可能触发服务端 500；这里改为重新打开授权地址并提交邮箱。"""
+    def _restart_email_otp_flow(reason: str) -> bool:
+        """Codex Auth 上直接点 resend 可能触发服务端 500；这里改为重新打开授权地址并提交邮箱。
+
+        返回值：True 表示重开授权后已用密码（+MFA）完成登录、页面已越过邮箱验证码，
+        调用方必须停止后续 OTP 轮询；避免“页面已授权成功却仍等 OTP”导致失败。
+        """
         nonlocal otp_after_ts
         logger.info("[Codex][Browser] 重新触发邮箱 OTP：%s", reason)
         otp_after_ts = time.time()
@@ -600,7 +604,7 @@ def _fill_email_and_otp(driver, email: str, otp_provider, auth_url: str) -> None
                     if not _fill_mfa_challenge_if_present(driver, email, timeout=45):
                         raise RuntimeError("Codex MFA challenge 未通过（TOTP 提交后仍停留）")
                 logger.info("[Codex][Browser] 重新提交邮箱后已用密码完成登录，进入后续步骤")
-                return
+                return True
             if pw_result == "mfa_failed":
                 raise RuntimeError("Codex MFA challenge 未通过（TOTP 提交后仍停留）")
             if pw_result != "email_otp":
@@ -612,8 +616,17 @@ def _fill_email_and_otp(driver, email: str, otp_provider, auth_url: str) -> None
             else:
                 logger.info("[Codex][Browser] 重开授权后已在邮箱 OTP 页面")
         human_delay("api")
+        return False
 
     for otp_attempt in range(1, max_otp_attempts + 1):
+        # 已越过邮箱验证码页（密码/MFA 登录完成，或已到 callback）时不再拉 OTP，
+        # 否则会出现“页面已授权成功却因取码失败而整体失败”。
+        if _is_mfa_challenge_page(driver) or _is_callback_url(str(driver.current_url or "")):
+            logger.info(
+                "[Codex][Browser] 页面已进入 MFA/callback，跳过邮箱 OTP 等待：%s",
+                driver.current_url,
+            )
+            return
         logger.info("[Codex][Browser] 等待邮箱 OTP：%s（第 %s/%s 次）", email, otp_attempt, max_otp_attempts)
         try:
             code = _wait_for_fresh_email_otp(
@@ -633,7 +646,9 @@ def _fill_email_and_otp(driver, email: str, otp_provider, auth_url: str) -> None
                 type(exc).__name__,
                 str(exc)[:180],
             )
-            _restart_email_otp_flow("等待验证码超时，避免点击 resend 导致 500")
+            if _restart_email_otp_flow("等待验证码超时，避免点击 resend 导致 500"):
+                logger.info("[Codex][Browser] 重开授权后已用密码完成登录，跳过剩余邮箱 OTP 轮询")
+                return
             continue
         used_codes.add(str(code))
         logger.info("[Codex][Browser] 邮箱 OTP 收到：%s", code)

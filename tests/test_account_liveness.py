@@ -391,9 +391,10 @@ class AccountLivenessTests(unittest.TestCase):
              patch.object(live_service.db, "update_account_liveness"), \
              patch.object(live_service, "_append_log"), \
              patch.object(live_service, "resolve_plan_check_route", side_effect=route_for), \
+             patch.object(live_service, "_live_proxy_route", side_effect=lambda url, cfg: route_for(url)), \
              patch("config.proxy.PLAN_CHECK_PROXY", [proxy_a, proxy_b]), \
              patch("config.proxy.PLAN_CHECK_MAX_ATTEMPTS", 3), \
-             patch.object(live_service.random, "choice", return_value=proxy_b), \
+             patch.object(live_service.random, "choice", side_effect=[proxy_a, proxy_b]), \
              patch.object(live_service, "check_account_liveness", side_effect=[failed, success]) as check:
             result = live_service._run_live_check(
                 account_id=1,
@@ -432,6 +433,7 @@ class AccountLivenessTests(unittest.TestCase):
              patch.object(live_service.db, "update_account_liveness"), \
              patch.object(live_service, "_append_log"), \
              patch.object(live_service, "resolve_plan_check_route", return_value=route), \
+             patch.object(live_service, "_live_proxy_route", return_value=route), \
              patch("config.proxy.PLAN_CHECK_PROXY", [proxy_url]), \
              patch("config.proxy.PLAN_CHECK_MAX_ATTEMPTS", 3), \
              patch.object(live_service, "check_account_liveness", return_value=failed) as check:
